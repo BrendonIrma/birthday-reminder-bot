@@ -1,0 +1,25 @@
+{
+  "name": "birthday-reminder-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for birthday reminders with AI-generated congratulations and gift ideas",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "setup": "node scripts/setup.js"
+  },
+  "keywords": ["telegram", "bot", "birthday", "reminder", "ai", "supabase"],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "node-cron": "^3.0.3",
+    "@supabase/supabase-js": "^2.38.4",
+    "dotenv": "^16.3.1",
+    "moment": "^2.29.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
