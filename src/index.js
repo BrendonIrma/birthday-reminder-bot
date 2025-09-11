@@ -49,7 +49,24 @@ class BirthdayBot {
 
 💡 Если добавите день рождения на сегодня - сразу получите поздравление!
             `;
-            await this.bot.sendMessage(chatId, welcomeMessage);
+            
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '📋 Мои дни рождения', callback_data: 'list' },
+                        { text: '📝 Примеры', callback_data: 'example' }
+                    ],
+                    [
+                        { text: '❓ Помощь', callback_data: 'help' },
+                        { text: '📊 Статус', callback_data: 'status' }
+                    ],
+                    [
+                        { text: '🧪 Тест напоминаний', callback_data: 'test_reminder' }
+                    ]
+                ]
+            };
+            
+            await this.bot.sendMessage(chatId, welcomeMessage, { reply_markup: keyboard });
         });
 
         // Обработчик команды /list
@@ -188,22 +205,50 @@ class BirthdayBot {
         // Обработчик команды /status (показать статус cron-задач)
         this.bot.onText(/\/status/, async (msg) => {
             const chatId = msg.chat.id;
-            const now = moment().format('DD.MM.YYYY HH:mm:ss');
-            const nextReminder = '09:00 по МСК времени';
-            
-            const statusMessage = `
-📊 Статус системы напоминаний:
+            await this.showStatus(chatId);
+        });
 
-⏰ Текущее время: ${now}
-🔔 Следующая проверка: ${nextReminder}
-🤖 Бот работает: ✅
-💾 База данных: ✅
+        // Обработчик callback-запросов от inline-кнопок
+        this.bot.on('callback_query', async (callbackQuery) => {
+            const chatId = callbackQuery.message.chat.id;
+            const data = callbackQuery.data;
+            const messageId = callbackQuery.message.message_id;
 
-🎯 Система автоматически проверяет дни рождения каждый день в 09:00 по московскому времени.
-
-🧪 Для тестирования используйте команду: /test_reminder
-            `;
-            await this.bot.sendMessage(chatId, statusMessage);
+            try {
+                switch (data) {
+                    case 'list':
+                        await this.showBirthdayList(chatId);
+                        break;
+                    case 'example':
+                        await this.showExamples(chatId);
+                        break;
+                    case 'help':
+                        await this.showHelp(chatId);
+                        break;
+                    case 'status':
+                        await this.showStatus(chatId);
+                        break;
+                    case 'test_reminder':
+                        await this.testReminder(chatId);
+                        break;
+                    case 'format':
+                        await this.showFormat(chatId);
+                        break;
+                    case 'main_menu':
+                        await this.showMainMenu(chatId);
+                        break;
+                    default:
+                        await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Неизвестная команда' });
+                        return;
+                }
+                
+                // Подтверждаем получение callback
+                await this.bot.answerCallbackQuery(callbackQuery.id);
+                
+            } catch (error) {
+                console.error('Error handling callback query:', error);
+                await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Произошла ошибка' });
+            }
         });
     }
 
@@ -262,7 +307,17 @@ class BirthdayBot {
                 } else {
                     // Обычное подтверждение
                     const confirmationMessage = `✅ Отлично! Я запомнил день рождения ${parsedData.name} (${parsedData.originalDate}). Буду напоминать вам об этом! 🎂`;
-                    await this.bot.sendMessage(chatId, confirmationMessage);
+                    
+                    const keyboard = {
+                        inline_keyboard: [
+                            [
+                                { text: '📋 Мои дни рождения', callback_data: 'list' },
+                                { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                            ]
+                        ]
+                    };
+                    
+                    await this.bot.sendMessage(chatId, confirmationMessage, { reply_markup: keyboard });
                 }
             } else {
                 console.log(`❌ Failed to add birthday for @${username}: ${parsedData.name}`);
@@ -377,12 +432,229 @@ class BirthdayBot {
         return message;
     }
 
+    // Методы для кнопок и команд
+    async showMainMenu(chatId) {
+        const welcomeMessage = `
+🎉 Главное меню бота напоминаний о днях рождения!
+
+Выберите действие с помощью кнопок ниже:
+        `;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📋 Мои дни рождения', callback_data: 'list' },
+                    { text: '📝 Примеры', callback_data: 'example' }
+                ],
+                [
+                    { text: '❓ Помощь', callback_data: 'help' },
+                    { text: '📊 Статус', callback_data: 'status' }
+                ],
+                [
+                    { text: '🧪 Тест напоминаний', callback_data: 'test_reminder' }
+                ]
+            ]
+        };
+        
+        await this.bot.sendMessage(chatId, welcomeMessage, { reply_markup: keyboard });
+    }
+
+    async showExamples(chatId) {
+        const exampleMessage = `
+📋 Готовые примеры для копирования:
+
+👩‍👧‍👦 Семья:
+• "Мама, 15 марта, любит цветы"
+• "Папа, 20.12.1965, водитель"
+• "Бабушка, 3 января, пенсионерка"
+
+👥 Друзья:
+• "Анна, 14 февраля, лучшая подруга"
+• "Сергей, 25.07.1990, одноклассник"
+• "Оля, 8 сентября, коллега"
+
+💼 Работа:
+• "Начальник, 10 мая, директор"
+• "Коллега, 30.11.1985, программист"
+• "Клиент, 22 апреля, предприниматель"
+
+🎂 Дети:
+• "Сын, 5 июня, школьник"
+• "Дочь, 12.10.2010, любит рисовать"
+• "Племянник, 18 августа, студент"
+
+💡 Просто скопируйте любой пример и замените данные!
+        `;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📝 Подробные форматы', callback_data: 'format' },
+                    { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                ]
+            ]
+        };
+        
+        await this.bot.sendMessage(chatId, exampleMessage, { reply_markup: keyboard });
+    }
+
+    async showHelp(chatId) {
+        const helpMessage = `
+📋 Доступные команды:
+
+/start - Начать работу с ботом
+/list - Показать список всех дней рождения
+/format - Подсказка по форматам ввода
+/example - Готовые примеры для копирования
+/test_reminder - Тестировать систему напоминаний
+/status - Показать статус системы
+/help - Показать эту справку
+
+💡 Как добавить день рождения:
+Отправьте сообщение в формате:
+"Имя, дата рождения, краткая информация"
+
+Примеры:
+• "Мария, 20 декабря, моя мама"
+• "Петр, 03.07.1992, коллега, программист"
+• "Елена, 14 февраля, подруга, любит цветы"
+
+📅 Поддерживаемые форматы дат:
+• 15.03.1990 (числовой)
+• 3 марта (текстовый)
+• 15 мая 1990
+• марта 3
+
+❌ Неправильно: "20 декабря, Мария, моя мама"
+✅ Правильно: "Мария, 20 декабря, моя мама"
+        `;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📝 Подробные форматы', callback_data: 'format' },
+                    { text: '📋 Примеры', callback_data: 'example' }
+                ],
+                [
+                    { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                ]
+            ]
+        };
+        
+        await this.bot.sendMessage(chatId, helpMessage, { reply_markup: keyboard });
+    }
+
+    async showFormat(chatId) {
+        const formatMessage = `
+📝 Подробная справка по форматам ввода:
+
+🎯 ОСНОВНОЕ ПРАВИЛО:
+Имя должно быть ПЕРВЫМ, затем дата, затем информация
+
+✅ ПРАВИЛЬНЫЕ ФОРМАТЫ:
+• "Имя, дата, информация"
+• "Имя дата информация" (без запятых)
+• "Имя, дата" (без информации)
+
+📅 ФОРМАТЫ ДАТ:
+
+Числовые (с годом):
+• 15.03.1990
+• 15/03/1990  
+• 15-03-1990
+• 03.15.1990
+
+Числовые (без года):
+• 15.03 (год = текущий)
+• 15/03
+• 15-03
+
+Текстовые:
+• 3 марта
+• 3 марта 1990
+• марта 3
+• марта 3 1990
+
+❌ НЕПРАВИЛЬНО:
+• "20 декабря, Мария" (дата перед именем)
+• "Мария 20" (неполная дата)
+• "20.12 Мария" (дата перед именем)
+
+✅ ПРАВИЛЬНО:
+• "Мария, 20 декабря"
+• "Мария 20.12.1990"
+• "Мария, 3 марта, моя сестра"
+        `;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📋 Примеры', callback_data: 'example' },
+                    { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                ]
+            ]
+        };
+        
+        await this.bot.sendMessage(chatId, formatMessage, { reply_markup: keyboard });
+    }
+
+    async showStatus(chatId) {
+        const now = moment().format('DD.MM.YYYY HH:mm:ss');
+        const nextReminder = '09:00 по МСК времени';
+        
+        const statusMessage = `
+📊 Статус системы напоминаний:
+
+⏰ Текущее время: ${now}
+🔔 Следующая проверка: ${nextReminder}
+🤖 Бот работает: ✅
+💾 База данных: ✅
+
+🎯 Система автоматически проверяет дни рождения каждый день в 09:00 по московскому времени.
+
+🧪 Для тестирования используйте команду: /test_reminder
+        `;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '🧪 Тест напоминаний', callback_data: 'test_reminder' },
+                    { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                ]
+            ]
+        };
+        
+        await this.bot.sendMessage(chatId, statusMessage, { reply_markup: keyboard });
+    }
+
+    async testReminder(chatId) {
+        await this.bot.sendMessage(chatId, '🔍 Запускаю тестовую проверку напоминаний...');
+        
+        try {
+            // Запускаем проверку напоминаний вручную
+            await this.birthdayReminder.checkAndSendReminders();
+            await this.bot.sendMessage(chatId, '✅ Тестовая проверка завершена! Если есть дни рождения на сегодня - вы получили уведомления.');
+        } catch (error) {
+            console.error('Error in test reminder:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при тестировании напоминаний.');
+        }
+    }
+
     async showBirthdayList(chatId) {
         try {
             const birthdays = await this.db.getBirthdaysByChatId(chatId);
             
             if (birthdays.length === 0) {
-                await this.bot.sendMessage(chatId, '📅 У вас пока нет сохраненных дней рождения.');
+                const emptyMessage = '📅 У вас пока нет сохраненных дней рождения.';
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '📝 Примеры', callback_data: 'example' },
+                            { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                        ]
+                    ]
+                };
+                await this.bot.sendMessage(chatId, emptyMessage, { reply_markup: keyboard });
                 return;
             }
 
@@ -399,7 +671,16 @@ class BirthdayBot {
                 message += `\n   ⏰ Через ${daysUntil} дней\n\n`;
             });
 
-            await this.bot.sendMessage(chatId, message);
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '🔄 Обновить список', callback_data: 'list' },
+                        { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                    ]
+                ]
+            };
+
+            await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
         } catch (error) {
             console.error('Error showing birthday list:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка при получении списка дней рождения.');
