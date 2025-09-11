@@ -7,6 +7,7 @@ import { SupabaseDatabase } from './database.js';
 import { MessageParser } from './messageParser.js';
 import { BirthdayReminder } from './birthdayReminder.js';
 import { AIAssistant } from './aiAssistant.js';
+import { SecurityUtils } from './security.js';
 
 // Загружаем переменные окружения
 dotenv.config();
@@ -18,6 +19,14 @@ class BirthdayBot {
         this.messageParser = new MessageParser();
         this.birthdayReminder = new BirthdayReminder(this.bot, this.db);
         this.aiAssistant = new AIAssistant();
+        this.security = new SecurityUtils();
+        
+        // Система защиты от спама
+        this.userRequests = new Map(); // chatId -> { count, resetTime }
+        this.RATE_LIMIT = 10; // максимум запросов в минуту
+        this.RATE_WINDOW = 60 * 1000; // окно в миллисекундах (1 минута)
+        this.MAX_MESSAGE_LENGTH = 1000; // максимум символов в сообщении
+        this.MAX_BIRTHDAYS_PER_USER = 100; // максимум дней рождения на пользователя
         
         this.setupHandlers();
         this.setupCronJobs();
@@ -257,6 +266,21 @@ class BirthdayBot {
             const chatId = callbackQuery.message.chat.id;
             const data = callbackQuery.data;
             const messageId = callbackQuery.message.message_id;
+            const username = callbackQuery.from.username || callbackQuery.from.first_name || 'Unknown';
+
+            // Проверяем rate limit для callback запросов
+            if (this.isRateLimited(chatId)) {
+                this.logSuspiciousActivity(chatId, username, 'CALLBACK_RATE_LIMIT_EXCEEDED', `Callback: ${data}`);
+                await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Слишком много запросов!' });
+                return;
+            }
+
+            // Валидируем callback данные
+            if (!this.validateCallbackData(data)) {
+                this.logSuspiciousActivity(chatId, username, 'INVALID_CALLBACK_DATA', `Callback: ${data}`);
+                await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Неверные данные!' });
+                return;
+            }
 
             try {
                 switch (data) {
@@ -346,20 +370,53 @@ class BirthdayBot {
         const text = msg.text;
         const username = msg.from.username || msg.from.first_name || 'Unknown';
 
+        // Проверяем, не заблокирован ли пользователь
+        if (this.security.isUserBlocked(chatId)) {
+            this.security.logSecurityEvent(chatId, username, 'BLOCKED_USER_ATTEMPT', { message: text.substring(0, 100) });
+            return;
+        }
+
+        // Проверяем на атаки
+        const attackCheck = this.security.isAttack(text);
+        if (attackCheck.isAttack) {
+            this.security.logSecurityEvent(chatId, username, 'ATTACK_DETECTED', attackCheck);
+            this.security.blockUser(chatId, `Attack detected: ${attackCheck.type}`);
+            await this.bot.sendMessage(chatId, '🚫 Ваш аккаунт заблокирован за подозрительную активность.');
+            return;
+        }
+
+        // Проверяем rate limit
+        if (this.isRateLimited(chatId)) {
+            this.logSuspiciousActivity(chatId, username, 'RATE_LIMIT_EXCEEDED', `Message: ${text.substring(0, 100)}`);
+            await this.bot.sendMessage(chatId, '⏰ Слишком много запросов! Подождите минуту перед следующим сообщением.');
+            return;
+        }
+
+        // Валидируем сообщение
+        const validation = this.validateMessage(text);
+        if (!validation.valid) {
+            this.logSuspiciousActivity(chatId, username, 'INVALID_MESSAGE', validation.error);
+            await this.bot.sendMessage(chatId, validation.error);
+            return;
+        }
+
+        // Санитизируем текст
+        const sanitizedText = this.security.sanitizeText(text);
+
         // Сохраняем/обновляем информацию о пользователе
         await this.saveUserInfo(msg.from);
 
         // Логируем все сообщения от пользователей
-        console.log(`📱 Message from @${username} (${chatId}): ${text}`);
+        console.log(`📱 Message from @${username} (${chatId}): ${sanitizedText}`);
 
         // Пропускаем команды
-        if (text.startsWith('/')) {
+        if (sanitizedText.startsWith('/')) {
             return;
         }
 
         // Проверяем, находится ли пользователь в режиме редактирования
         if (this.editingBirthday && this.editingBirthday[chatId]) {
-            await this.handleEditBirthday(chatId, text);
+            await this.handleEditBirthday(chatId, sanitizedText);
             return;
         }
 
@@ -367,10 +424,18 @@ class BirthdayBot {
         await this.checkTodayBirthdays(chatId);
 
         try {
-            const parsedData = this.messageParser.parseMessage(text);
+            const parsedData = this.messageParser.parseMessage(sanitizedText);
             
             if (parsedData.error) {
                 await this.bot.sendMessage(chatId, `❌ ${parsedData.error}`);
+                return;
+            }
+
+            // Проверяем лимит дней рождения на пользователя
+            const userBirthdays = await this.db.getBirthdaysByChatId(chatId);
+            if (userBirthdays.length >= this.MAX_BIRTHDAYS_PER_USER) {
+                this.logSuspiciousActivity(chatId, username, 'BIRTHDAY_LIMIT_EXCEEDED', `Current count: ${userBirthdays.length}`);
+                await this.bot.sendMessage(chatId, `❌ Достигнут лимит дней рождения (${this.MAX_BIRTHDAYS_PER_USER}). Удалите некоторые записи, чтобы добавить новые.`);
                 return;
             }
 
@@ -632,6 +697,118 @@ class BirthdayBot {
                 await this.bot.sendMessage(chatId, `🔄 Режим редактирования отменен. ${reason}`);
             }
         }
+    }
+
+    // Метод для проверки rate limit
+    isRateLimited(chatId) {
+        const now = Date.now();
+        const userData = this.userRequests.get(chatId);
+        
+        if (!userData) {
+            this.userRequests.set(chatId, { count: 1, resetTime: now + this.RATE_WINDOW });
+            return false;
+        }
+        
+        // Если окно истекло, сбрасываем счетчик
+        if (now > userData.resetTime) {
+            this.userRequests.set(chatId, { count: 1, resetTime: now + this.RATE_WINDOW });
+            return false;
+        }
+        
+        // Если превышен лимит
+        if (userData.count >= this.RATE_LIMIT) {
+            return true;
+        }
+        
+        // Увеличиваем счетчик
+        userData.count++;
+        this.userRequests.set(chatId, userData);
+        return false;
+    }
+
+    // Метод для валидации сообщения
+    validateMessage(text) {
+        // Проверка длины сообщения
+        if (text.length > this.MAX_MESSAGE_LENGTH) {
+            return {
+                valid: false,
+                error: `❌ Сообщение слишком длинное (максимум ${this.MAX_MESSAGE_LENGTH} символов).`
+            };
+        }
+        
+        // Проверка на подозрительные символы
+        const suspiciousPatterns = [
+            /<script/i,
+            /javascript:/i,
+            /on\w+\s*=/i,
+            /eval\s*\(/i,
+            /function\s*\(/i
+        ];
+        
+        for (const pattern of suspiciousPatterns) {
+            if (pattern.test(text)) {
+                return {
+                    valid: false,
+                    error: '❌ Сообщение содержит подозрительные символы.'
+                };
+            }
+        }
+        
+        // Проверка на повторяющиеся символы (защита от спама)
+        const repeatedChars = /(.)\1{20,}/;
+        if (repeatedChars.test(text)) {
+            return {
+                valid: false,
+                error: '❌ Сообщение содержит слишком много повторяющихся символов.'
+            };
+        }
+        
+        return { valid: true };
+    }
+
+    // Метод для санитизации данных
+    sanitizeInput(input) {
+        if (typeof input !== 'string') return input;
+        
+        return input
+            .replace(/[<>\"'&]/g, '') // Удаляем потенциально опасные символы
+            .replace(/\s+/g, ' ') // Нормализуем пробелы
+            .trim()
+            .substring(0, this.MAX_MESSAGE_LENGTH); // Ограничиваем длину
+    }
+
+    // Метод для логирования подозрительной активности
+    logSuspiciousActivity(chatId, username, activity, details = '') {
+        const timestamp = new Date().toISOString();
+        console.log(`🚨 SUSPICIOUS ACTIVITY [${timestamp}]`);
+        console.log(`   Chat ID: ${chatId}`);
+        console.log(`   Username: @${username || 'unknown'}`);
+        console.log(`   Activity: ${activity}`);
+        console.log(`   Details: ${details}`);
+        console.log('---');
+    }
+
+    // Метод для валидации callback данных
+    validateCallbackData(data) {
+        // Разрешенные callback данные
+        const allowedCallbacks = [
+            'list', 'example', 'help', 'status', 'test_reminder', 'format', 
+            'stats', 'edit', 'delete', 'main_menu'
+        ];
+        
+        // Проверяем, что это разрешенный callback
+        if (allowedCallbacks.includes(data)) {
+            return true;
+        }
+        
+        // Проверяем паттерны для edit_ и delete_
+        if (data.startsWith('edit_') || data.startsWith('delete_')) {
+            const id = data.replace(/^(edit_|delete_)/, '');
+            // Проверяем, что ID содержит только цифры
+            return /^\d+$/.test(id);
+        }
+        
+        return false;
     }
 
     // Методы для кнопок и команд
