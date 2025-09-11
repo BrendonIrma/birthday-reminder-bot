@@ -114,8 +114,26 @@ class BirthdayBot {
             );
 
             if (birthdayId) {
-                const confirmationMessage = `✅ Отлично! Я запомнил день рождения ${parsedData.name} (${parsedData.originalDate}). Буду напоминать вам об этом! 🎂`;
-                await this.bot.sendMessage(chatId, confirmationMessage);
+                // Проверяем, является ли добавленный день рождения сегодняшним
+                const today = new Date();
+                const month = today.getMonth() + 1;
+                const day = today.getDate();
+                
+                const addedBirthday = new Date(parsedData.date);
+                const addedMonth = addedBirthday.getMonth() + 1;
+                const addedDay = addedBirthday.getDate();
+                
+                if (month === addedMonth && day === addedDay) {
+                    // Если добавленный день рождения сегодня - отправляем мгновенное поздравление
+                    await this.sendInstantBirthdayMessage(chatId, {
+                        name: parsedData.name,
+                        info: parsedData.info || ''
+                    });
+                } else {
+                    // Обычное подтверждение
+                    const confirmationMessage = `✅ Отлично! Я запомнил день рождения ${parsedData.name} (${parsedData.originalDate}). Буду напоминать вам об этом! 🎂`;
+                    await this.bot.sendMessage(chatId, confirmationMessage);
+                }
             } else {
                 await this.bot.sendMessage(chatId, '❌ Произошла ошибка при сохранении данных.');
             }
