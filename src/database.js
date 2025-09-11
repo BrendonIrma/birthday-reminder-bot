@@ -28,6 +28,89 @@ export class SupabaseDatabase {
         }
     }
 
+    // Методы для работы с пользователями
+    async upsertUser(chatId, username = null, firstName = null, lastName = null, isBot = false, languageCode = null) {
+        try {
+            const { error } = await this.supabase.rpc('upsert_user', {
+                p_chat_id: chatId,
+                p_username: username,
+                p_first_name: firstName,
+                p_last_name: lastName,
+                p_is_bot: isBot,
+                p_language_code: languageCode
+            });
+
+            if (error) {
+                console.error('Error upserting user:', error);
+                return false;
+            }
+
+            console.log(`User upserted: ${username || firstName || chatId}`);
+            return true;
+        } catch (error) {
+            console.error('Failed to upsert user:', error);
+            return false;
+        }
+    }
+
+    async getUser(chatId) {
+        try {
+            const { data, error } = await this.supabase
+                .from('users')
+                .select('*')
+                .eq('chat_id', chatId)
+                .single();
+
+            if (error) {
+                console.error('Error getting user:', error);
+                return null;
+            }
+
+            return data;
+        } catch (error) {
+            console.error('Failed to get user:', error);
+            return null;
+        }
+    }
+
+    async getAllUsers() {
+        try {
+            const { data, error } = await this.supabase
+                .from('users')
+                .select('*')
+                .order('last_activity', { ascending: false });
+
+            if (error) {
+                console.error('Error getting all users:', error);
+                return [];
+            }
+
+            return data || [];
+        } catch (error) {
+            console.error('Failed to get all users:', error);
+            return [];
+        }
+    }
+
+    async updateUserActivity(chatId) {
+        try {
+            const { error } = await this.supabase
+                .from('users')
+                .update({ last_activity: new Date().toISOString() })
+                .eq('chat_id', chatId);
+
+            if (error) {
+                console.error('Error updating user activity:', error);
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Failed to update user activity:', error);
+            return false;
+        }
+    }
+
     async addBirthday(chatId, name, date, info = null) {
         try {
             const { data, error } = await this.supabase

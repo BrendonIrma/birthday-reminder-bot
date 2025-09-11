@@ -35,6 +35,9 @@ class BirthdayBot {
         // Обработчик команды /start
         this.bot.onText(/\/start/, async (msg) => {
             const chatId = msg.chat.id;
+            
+            // Сохраняем информацию о пользователе
+            await this.saveUserInfo(msg.from);
             const welcomeMessage = `
 🎉 Добро пожаловать в бота напоминаний о днях рождения!
 
@@ -208,6 +211,12 @@ class BirthdayBot {
             await this.showStatus(chatId);
         });
 
+        // Обработчик команды /stats (показать статистику пользователей)
+        this.bot.onText(/\/stats/, async (msg) => {
+            const chatId = msg.chat.id;
+            await this.showStats(chatId);
+        });
+
         // Обработчик callback-запросов от inline-кнопок
         this.bot.on('callback_query', async (callbackQuery) => {
             const chatId = callbackQuery.message.chat.id;
@@ -234,6 +243,9 @@ class BirthdayBot {
                     case 'format':
                         await this.showFormat(chatId);
                         break;
+                    case 'stats':
+                        await this.showStats(chatId);
+                        break;
                     case 'main_menu':
                         await this.showMainMenu(chatId);
                         break;
@@ -256,6 +268,9 @@ class BirthdayBot {
         const chatId = msg.chat.id;
         const text = msg.text;
         const username = msg.from.username || msg.from.first_name || 'Unknown';
+
+        // Сохраняем/обновляем информацию о пользователе
+        await this.saveUserInfo(msg.from);
 
         // Логируем все сообщения от пользователей
         console.log(`📱 Message from @${username} (${chatId}): ${text}`);
@@ -432,6 +447,23 @@ class BirthdayBot {
         return message;
     }
 
+    // Метод для сохранения информации о пользователе
+    async saveUserInfo(user) {
+        try {
+            const chatId = user.id;
+            const username = user.username || null;
+            const firstName = user.first_name || null;
+            const lastName = user.last_name || null;
+            const isBot = user.is_bot || false;
+            const languageCode = user.language_code || null;
+
+            await this.db.upsertUser(chatId, username, firstName, lastName, isBot, languageCode);
+            await this.db.updateUserActivity(chatId);
+        } catch (error) {
+            console.error('Error saving user info:', error);
+        }
+    }
+
     // Методы для кнопок и команд
     async showMainMenu(chatId) {
         const welcomeMessage = `
@@ -451,6 +483,7 @@ class BirthdayBot {
                     { text: '📊 Статус', callback_data: 'status' }
                 ],
                 [
+                    { text: '📈 Статистика', callback_data: 'stats' },
                     { text: '🧪 Тест напоминаний', callback_data: 'test_reminder' }
                 ]
             ]
@@ -637,6 +670,49 @@ class BirthdayBot {
         } catch (error) {
             console.error('Error in test reminder:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка при тестировании напоминаний.');
+        }
+    }
+
+    async showStats(chatId) {
+        try {
+            const users = await this.db.getAllUsers();
+            const totalUsers = users.length;
+            const activeUsers = users.filter(user => {
+                const lastActivity = new Date(user.last_activity);
+                const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                return lastActivity > oneWeekAgo;
+            }).length;
+
+            const statsMessage = `
+📊 Статистика пользователей:
+
+👥 Всего пользователей: ${totalUsers}
+🟢 Активных за неделю: ${activeUsers}
+📅 Последняя активность: ${users.length > 0 ? new Date(users[0].last_activity).toLocaleString('ru-RU') : 'Нет данных'}
+
+🔝 Топ-5 пользователей по активности:
+${users.slice(0, 5).map((user, index) => {
+    const name = user.username ? `@${user.username}` : user.first_name || `ID: ${user.chat_id}`;
+    const lastActivity = new Date(user.last_activity).toLocaleDateString('ru-RU');
+    return `${index + 1}. ${name} (${lastActivity})`;
+}).join('\n')}
+
+💡 Активными считаются пользователи, которые использовали бота в течение последней недели.
+            `;
+
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '🔄 Обновить статистику', callback_data: 'stats' },
+                        { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                    ]
+                ]
+            };
+
+            await this.bot.sendMessage(chatId, statsMessage, { reply_markup: keyboard });
+        } catch (error) {
+            console.error('Error showing stats:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при получении статистики.');
         }
     }
 
