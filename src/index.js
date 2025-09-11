@@ -36,6 +36,11 @@ class BirthdayBot {
         this.bot.onText(/\/start/, async (msg) => {
             const chatId = msg.chat.id;
             
+            // Очищаем режим редактирования при команде /start
+            if (this.editingBirthday && this.editingBirthday[chatId]) {
+                delete this.editingBirthday[chatId];
+            }
+            
             // Сохраняем информацию о пользователе
             await this.saveUserInfo(msg.from);
             const welcomeMessage = `
@@ -238,33 +243,73 @@ class BirthdayBot {
             try {
                 switch (data) {
                     case 'list':
+                        // Очищаем режим редактирования при просмотре списка
+                        if (this.editingBirthday && this.editingBirthday[chatId]) {
+                            delete this.editingBirthday[chatId];
+                        }
                         await this.showBirthdayList(chatId);
                         break;
                     case 'example':
+                        // Очищаем режим редактирования при просмотре примеров
+                        if (this.editingBirthday && this.editingBirthday[chatId]) {
+                            delete this.editingBirthday[chatId];
+                        }
                         await this.showExamples(chatId);
                         break;
                     case 'help':
+                        // Очищаем режим редактирования при просмотре помощи
+                        if (this.editingBirthday && this.editingBirthday[chatId]) {
+                            delete this.editingBirthday[chatId];
+                        }
                         await this.showHelp(chatId);
                         break;
                     case 'status':
+                        // Очищаем режим редактирования при просмотре статуса
+                        if (this.editingBirthday && this.editingBirthday[chatId]) {
+                            delete this.editingBirthday[chatId];
+                        }
                         await this.showStatus(chatId);
                         break;
                     case 'test_reminder':
+                        // Очищаем режим редактирования при тестировании
+                        if (this.editingBirthday && this.editingBirthday[chatId]) {
+                            delete this.editingBirthday[chatId];
+                        }
                         await this.testReminder(chatId);
                         break;
                     case 'format':
+                        // Очищаем режим редактирования при просмотре форматов
+                        if (this.editingBirthday && this.editingBirthday[chatId]) {
+                            delete this.editingBirthday[chatId];
+                        }
                         await this.showFormat(chatId);
                         break;
                     case 'stats':
+                        // Очищаем режим редактирования при просмотре статистики
+                        if (this.editingBirthday && this.editingBirthday[chatId]) {
+                            delete this.editingBirthday[chatId];
+                        }
                         await this.showStats(chatId);
                         break;
                     case 'edit':
+                        // Очищаем режим редактирования при входе в меню редактирования
+                        if (this.editingBirthday && this.editingBirthday[chatId]) {
+                            delete this.editingBirthday[chatId];
+                        }
                         await this.showEditMenu(chatId);
                         break;
                     case 'delete':
+                        // Очищаем режим редактирования при входе в меню удаления
+                        if (this.editingBirthday && this.editingBirthday[chatId]) {
+                            delete this.editingBirthday[chatId];
+                        }
                         await this.showDeleteMenu(chatId);
                         break;
                     case 'main_menu':
+                        // Очищаем режим редактирования при возврате в главное меню
+                        if (this.editingBirthday && this.editingBirthday[chatId]) {
+                            delete this.editingBirthday[chatId];
+                        }
                         await this.showMainMenu(chatId);
                         break;
                     default:
@@ -275,6 +320,12 @@ class BirthdayBot {
                         } else if (data.startsWith('delete_')) {
                             const birthdayId = data.replace('delete_', '');
                             await this.deleteBirthday(chatId, birthdayId);
+                        } else if (data === 'edit') {
+                            // Очищаем режим редактирования при возврате к списку редактирования
+                            if (this.editingBirthday && this.editingBirthday[chatId]) {
+                                delete this.editingBirthday[chatId];
+                            }
+                            await this.showEditMenu(chatId);
                         } else {
                             await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Неизвестная команда' });
                             return;
