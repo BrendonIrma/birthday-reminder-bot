@@ -90,6 +90,10 @@ class BirthdayBot {
     async handleMessage(msg) {
         const chatId = msg.chat.id;
         const text = msg.text;
+        const username = msg.from.username || msg.from.first_name || 'Unknown';
+
+        // Логируем все сообщения от пользователей
+        console.log(`📱 Message from @${username} (${chatId}): ${text}`);
 
         // Пропускаем команды
         if (text.startsWith('/')) {
@@ -116,6 +120,9 @@ class BirthdayBot {
             );
 
             if (birthdayId) {
+                // Логируем добавление дня рождения
+                console.log(`🎂 Added birthday: ${parsedData.name} (${parsedData.originalDate}) for @${username} (${chatId})`);
+                
                 // Проверяем, является ли добавленный день рождения сегодняшним
                 const today = new Date();
                 const month = today.getMonth() + 1;
@@ -127,6 +134,7 @@ class BirthdayBot {
                 
                 if (month === addedMonth && day === addedDay) {
                     // Если добавленный день рождения сегодня - отправляем мгновенное поздравление
+                    console.log(`🎉 Instant birthday notification sent to @${username} for ${parsedData.name}`);
                     await this.sendInstantBirthdayMessage(chatId, {
                         name: parsedData.name,
                         info: parsedData.info || ''
@@ -137,6 +145,7 @@ class BirthdayBot {
                     await this.bot.sendMessage(chatId, confirmationMessage);
                 }
             } else {
+                console.log(`❌ Failed to add birthday for @${username}: ${parsedData.name}`);
                 await this.bot.sendMessage(chatId, '❌ Произошла ошибка при сохранении данных.');
             }
 
