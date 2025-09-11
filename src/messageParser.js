@@ -14,15 +14,23 @@ export class MessageParser {
             // Различные паттерны для парсинга
             const patterns = [
                 // Паттерн: "Имя, дата, информация"
-                /^(.+?),\s*(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})\s*,?\s*(.*)$/i,
+                /^(.+?),\s*(\d{1,2}[.\-/]\d{1,2}(?:[.\-/]\d{2,4})?)\s*,?\s*(.*)$/i,
                 // Паттерн: "Имя дата информация" (без запятых)
-                /^(.+?)\s+(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})\s+(.*)$/i,
+                /^(.+?)\s+(\d{1,2}[.\-/]\d{1,2}(?:[.\-/]\d{2,4})?)\s+(.*)$/i,
                 // Паттерн: "дата Имя информация"
-                /^(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4})\s+(.+?)\s*,?\s*(.*)$/i,
+                /^(\d{1,2}[.\-/]\d{1,2}(?:[.\-/]\d{2,4})?)\s+(.+?)\s*,?\s*(.*)$/i,
                 // Паттерн: "Имя, текстовый формат даты, информация"
                 /^(.+?),\s*([а-яё\s\d]+)\s*,?\s*(.*)$/i,
                 // Паттерн: "Имя текстовый формат даты информация"
-                /^(.+?)\s+([а-яё\s\d]+)\s+(.*)$/i
+                /^(.+?)\s+([а-яё\s\d]+)\s+(.*)$/i,
+                // Паттерн: "Имя, дата" (без информации)
+                /^(.+?),\s*(\d{1,2}[.\-/]\d{1,2}(?:[.\-/]\d{2,4})?)\s*$/i,
+                // Паттерн: "Имя дата" (без информации)
+                /^(.+?)\s+(\d{1,2}[.\-/]\d{1,2}(?:[.\-/]\d{2,4})?)\s*$/i,
+                // Паттерн: "Имя, текстовый формат даты" (без информации)
+                /^(.+?),\s*([а-яё\s\d]+)\s*$/i,
+                // Паттерн: "Имя текстовый формат даты" (без информации)
+                /^(.+?)\s+([а-яё\s\d]+)\s*$/i
             ];
 
             let match = null;
@@ -68,7 +76,7 @@ export class MessageParser {
             const parsedDate = this.parseDate(dateStr);
             if (!parsedDate) {
                 return {
-                    error: 'Неверный формат даты. Используйте формат ДД.ММ.ГГГГ или "3 марта"'
+                    error: 'Неверный формат даты. Поддерживаемые форматы:\n• 15.03.1990 или 15.03\n• 3 марта или 3 марта 1990\n• 15/03/1990 или 15-03-1990\n• 03.15.1990 (месяц.день.год)'
                 };
             }
 
@@ -108,7 +116,19 @@ export class MessageParser {
                 'D.M.YYYY',
                 'D.M.YY',
                 'DD.MM',
-                'D.M'
+                'D.M',
+                'MM.DD.YYYY',
+                'MM.DD.YY',
+                'M.D.YYYY',
+                'M.D.YY',
+                'MM.DD',
+                'M.D',
+                'YYYY.MM.DD',
+                'YY.MM.DD',
+                'YYYY.M.D',
+                'YY.M.D',
+                'MM.DD.YYYY',
+                'M.D.YYYY'
             ];
 
             // Пробуем каждый формат
@@ -116,11 +136,19 @@ export class MessageParser {
                 parsedDate = moment(normalizedDate, format, true);
                 if (parsedDate.isValid()) {
                     // Если год не указан, используем текущий год
-                    if (format.includes('DD.MM') || format.includes('D.M')) {
+                    if (format.includes('DD.MM') || format.includes('D.M') || 
+                        format.includes('MM.DD') || format.includes('M.D')) {
                         const currentYear = moment().year();
-                        parsedDate = moment(normalizedDate + '.' + currentYear, 'DD.MM.YYYY', true);
-                        if (!parsedDate.isValid()) {
-                            parsedDate = moment(normalizedDate + '.' + currentYear, 'D.M.YYYY', true);
+                        if (format.includes('DD.MM') || format.includes('D.M')) {
+                            parsedDate = moment(normalizedDate + '.' + currentYear, 'DD.MM.YYYY', true);
+                            if (!parsedDate.isValid()) {
+                                parsedDate = moment(normalizedDate + '.' + currentYear, 'D.M.YYYY', true);
+                            }
+                        } else {
+                            parsedDate = moment(normalizedDate + '.' + currentYear, 'MM.DD.YYYY', true);
+                            if (!parsedDate.isValid()) {
+                                parsedDate = moment(normalizedDate + '.' + currentYear, 'M.D.YYYY', true);
+                            }
                         }
                     }
                     break;
