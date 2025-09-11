@@ -13,7 +13,9 @@
 
 ### 1. Выполните SQL скрипт в Supabase
 
-Откройте Supabase Dashboard → SQL Editor и выполните содержимое файла `supabase/schema_with_users.sql`:
+**ВАЖНО:** Если у вас уже есть база данных с таблицей `birthdays`, используйте файл `supabase/update_existing_db.sql` вместо `schema_with_users.sql`.
+
+Откройте Supabase Dashboard → SQL Editor и выполните содержимое файла `supabase/update_existing_db.sql`:
 
 ```sql
 -- Создание таблицы пользователей

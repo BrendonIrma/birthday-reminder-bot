@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_activity TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Создание таблицы для дней рождения
+-- Создание таблицы для дней рождения (если не существует)
 CREATE TABLE IF NOT EXISTS birthdays (
     id SERIAL PRIMARY KEY,
     chat_id BIGINT NOT NULL,
@@ -20,9 +20,22 @@ CREATE TABLE IF NOT EXISTS birthdays (
     birth_date DATE NOT NULL,
     info TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    FOREIGN KEY (chat_id) REFERENCES users(chat_id) ON DELETE CASCADE
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Добавляем внешний ключ, если его еще нет
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE constraint_name = 'fk_birthdays_user' 
+        AND table_name = 'birthdays'
+    ) THEN
+        ALTER TABLE birthdays 
+        ADD CONSTRAINT fk_birthdays_user 
+        FOREIGN KEY (chat_id) REFERENCES users(chat_id) ON DELETE CASCADE;
+    END IF;
+END $$;
 
 -- Создание индексов для оптимизации запросов
 CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users(chat_id);
@@ -46,6 +59,8 @@ CREATE TRIGGER update_users_updated_at
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+-- Удаляем существующий триггер, если он есть, и создаем заново
+DROP TRIGGER IF EXISTS update_birthdays_updated_at ON birthdays;
 CREATE TRIGGER update_birthdays_updated_at 
     BEFORE UPDATE ON birthdays 
     FOR EACH ROW 
@@ -56,25 +71,32 @@ ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE birthdays ENABLE ROW LEVEL SECURITY;
 
 -- Создание политик безопасности для таблицы пользователей
+DROP POLICY IF EXISTS "Users can view all users" ON users;
 CREATE POLICY "Users can view all users" ON users
     FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Users can insert their own data" ON users;
 CREATE POLICY "Users can insert their own data" ON users
     FOR INSERT WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Users can update their own data" ON users;
 CREATE POLICY "Users can update their own data" ON users
     FOR UPDATE USING (true);
 
 -- Создание политик безопасности для таблицы дней рождения
+DROP POLICY IF EXISTS "Users can view their own birthdays" ON birthdays;
 CREATE POLICY "Users can view their own birthdays" ON birthdays
     FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Users can insert their own birthdays" ON birthdays;
 CREATE POLICY "Users can insert their own birthdays" ON birthdays
     FOR INSERT WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Users can update their own birthdays" ON birthdays;
 CREATE POLICY "Users can update their own birthdays" ON birthdays
     FOR UPDATE USING (true);
 
+DROP POLICY IF EXISTS "Users can delete their own birthdays" ON birthdays;
 CREATE POLICY "Users can delete their own birthdays" ON birthdays
     FOR DELETE USING (true);
 
