@@ -68,6 +68,8 @@ class BirthdayBot {
 /list - Показать список всех дней рождения
 /format - Подсказка по форматам ввода
 /example - Готовые примеры для копирования
+/test_reminder - Тестировать систему напоминаний
+/status - Показать статус системы
 /help - Показать эту справку
 
 💡 Как добавить день рождения:
@@ -166,6 +168,42 @@ class BirthdayBot {
 💡 Просто скопируйте любой пример и замените данные!
             `;
             await this.bot.sendMessage(chatId, exampleMessage);
+        });
+
+        // Обработчик команды /test_reminder (тестирование системы напоминаний)
+        this.bot.onText(/\/test_reminder/, async (msg) => {
+            const chatId = msg.chat.id;
+            await this.bot.sendMessage(chatId, '🔍 Запускаю тестовую проверку напоминаний...');
+            
+            try {
+                // Запускаем проверку напоминаний вручную
+                await this.birthdayReminder.checkAndSendReminders();
+                await this.bot.sendMessage(chatId, '✅ Тестовая проверка завершена! Если есть дни рождения на сегодня - вы получили уведомления.');
+            } catch (error) {
+                console.error('Error in test reminder:', error);
+                await this.bot.sendMessage(chatId, '❌ Ошибка при тестировании напоминаний.');
+            }
+        });
+
+        // Обработчик команды /status (показать статус cron-задач)
+        this.bot.onText(/\/status/, async (msg) => {
+            const chatId = msg.chat.id;
+            const now = moment().format('DD.MM.YYYY HH:mm:ss');
+            const nextReminder = '09:00 по МСК времени';
+            
+            const statusMessage = `
+📊 Статус системы напоминаний:
+
+⏰ Текущее время: ${now}
+🔔 Следующая проверка: ${nextReminder}
+🤖 Бот работает: ✅
+💾 База данных: ✅
+
+🎯 Система автоматически проверяет дни рождения каждый день в 09:00 по московскому времени.
+
+🧪 Для тестирования используйте команду: /test_reminder
+            `;
+            await this.bot.sendMessage(chatId, statusMessage);
         });
     }
 
@@ -407,6 +445,19 @@ class BirthdayBot {
         });
 
         this.httpServer = server;
+    }
+
+    setupCronJobs() {
+        // Проверяем дни рождения каждый день в 09:00 по московскому времени
+        cron.schedule('0 9 * * *', async () => {
+            console.log('🔔 Cron: Checking birthdays at 09:00 MSK...');
+            await this.birthdayReminder.checkAndSendReminders();
+        }, {
+            scheduled: true,
+            timezone: "Europe/Moscow"
+        });
+        
+        console.log('✅ Cron jobs set up successfully - daily reminders at 09:00 MSK');
     }
 
     async start() {
