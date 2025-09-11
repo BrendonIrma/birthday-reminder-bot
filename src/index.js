@@ -2,6 +2,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import cron from 'node-cron';
 import dotenv from 'dotenv';
 import moment from 'moment';
+import http from 'http';
 import { SupabaseDatabase } from './database.js';
 import { MessageParser } from './messageParser.js';
 import { BirthdayReminder } from './birthdayReminder.js';
@@ -20,6 +21,7 @@ class BirthdayBot {
         
         this.setupHandlers();
         this.setupCronJobs();
+        this.setupHttpServer();
     }
 
     setupHandlers() {
@@ -220,6 +222,37 @@ class BirthdayBot {
         });
 
         console.log('Cron jobs set up successfully');
+    }
+
+    setupHttpServer() {
+        const port = process.env.PORT || 3000;
+        
+        const server = http.createServer((req, res) => {
+            if (req.url === '/' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ 
+                    status: 'ok', 
+                    message: 'Birthday Bot is running',
+                    timestamp: new Date().toISOString()
+                }));
+            } else if (req.url === '/health' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ 
+                    status: 'healthy',
+                    uptime: process.uptime(),
+                    timestamp: new Date().toISOString()
+                }));
+            } else {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Not found' }));
+            }
+        });
+
+        server.listen(port, () => {
+            console.log(`HTTP server running on port ${port}`);
+        });
+
+        this.httpServer = server;
     }
 
     async start() {
