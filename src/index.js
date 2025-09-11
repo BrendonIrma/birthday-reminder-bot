@@ -193,25 +193,68 @@ class BirthdayBot {
             const name = birthday.name;
             const info = birthday.info || '';
 
-            // Основное сообщение о дне рождения
-            const birthdayMessage = `🎉 Сегодня день рождения у ${name}!`;
-            await this.bot.sendMessage(chatId, birthdayMessage);
-
-            // Генерируем поздравление
+            // Генерируем поздравление и идею подарка
             const congratulations = await this.aiAssistant.generateCongratulations(name, info);
-            if (congratulations) {
-                await this.bot.sendMessage(chatId, `💌 Поздравление:\n\n${congratulations}`);
-            }
-
-            // Генерируем идею подарка
             const giftIdea = await this.aiAssistant.generateGiftIdea(name, info);
-            if (giftIdea) {
-                await this.bot.sendMessage(chatId, `🎁 Идея для подарка:\n\n${giftIdea}`);
-            }
+
+            // Создаем объединенное сообщение
+            const combinedMessage = this.createCombinedMessage(name, congratulations, giftIdea);
+            await this.bot.sendMessage(chatId, combinedMessage);
 
         } catch (error) {
             console.error('Error sending instant birthday message:', error);
         }
+    }
+
+    createCombinedMessage(name, congratulations, giftIdea) {
+        let message = `🎉 Сегодня день рождения у ${name}!\n\n`;
+        
+        // Добавляем поздравление
+        if (congratulations) {
+            message += `💌 ${congratulations}\n\n`;
+        }
+        
+        // Добавляем идею подарка
+        if (giftIdea) {
+            message += `🎁 ${giftIdea}`;
+        }
+        
+        // Ограничиваем до 400 символов
+        if (message.length > 400) {
+            // Если сообщение слишком длинное, сокращаем поздравление и идею подарка
+            const baseMessage = `🎉 Сегодня день рождения у ${name}!\n\n`;
+            const availableSpace = 400 - baseMessage.length;
+            
+            let congratulationsText = '';
+            let giftIdeaText = '';
+            
+            if (congratulations && giftIdea) {
+                // Распределяем место поровну между поздравлением и идеей подарка
+                const spacePerPart = Math.floor(availableSpace / 2) - 10; // 10 символов на эмодзи и переносы
+                
+                congratulationsText = congratulations.length > spacePerPart 
+                    ? congratulations.substring(0, spacePerPart - 3) + '...'
+                    : congratulations;
+                    
+                giftIdeaText = giftIdea.length > spacePerPart 
+                    ? giftIdea.substring(0, spacePerPart - 3) + '...'
+                    : giftIdea;
+                    
+                message = `${baseMessage}💌 ${congratulationsText}\n\n🎁 ${giftIdeaText}`;
+            } else if (congratulations) {
+                congratulationsText = congratulations.length > availableSpace - 5
+                    ? congratulations.substring(0, availableSpace - 8) + '...'
+                    : congratulations;
+                message = `${baseMessage}💌 ${congratulationsText}`;
+            } else if (giftIdea) {
+                giftIdeaText = giftIdea.length > availableSpace - 5
+                    ? giftIdea.substring(0, availableSpace - 8) + '...'
+                    : giftIdea;
+                message = `${baseMessage}🎁 ${giftIdeaText}`;
+            }
+        }
+        
+        return message;
     }
 
     async showBirthdayList(chatId) {
