@@ -217,6 +217,18 @@ class BirthdayBot {
             await this.showStats(chatId);
         });
 
+        // Обработчик команды /edit (редактировать дни рождения)
+        this.bot.onText(/\/edit/, async (msg) => {
+            const chatId = msg.chat.id;
+            await this.showEditMenu(chatId);
+        });
+
+        // Обработчик команды /delete (удалить день рождения)
+        this.bot.onText(/\/delete/, async (msg) => {
+            const chatId = msg.chat.id;
+            await this.showDeleteMenu(chatId);
+        });
+
         // Обработчик callback-запросов от inline-кнопок
         this.bot.on('callback_query', async (callbackQuery) => {
             const chatId = callbackQuery.message.chat.id;
@@ -246,12 +258,28 @@ class BirthdayBot {
                     case 'stats':
                         await this.showStats(chatId);
                         break;
+                    case 'edit':
+                        await this.showEditMenu(chatId);
+                        break;
+                    case 'delete':
+                        await this.showDeleteMenu(chatId);
+                        break;
                     case 'main_menu':
                         await this.showMainMenu(chatId);
                         break;
                     default:
-                        await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Неизвестная команда' });
-                        return;
+                        // Обработка редактирования и удаления по ID
+                        if (data.startsWith('edit_')) {
+                            const birthdayId = data.replace('edit_', '');
+                            await this.showEditForm(chatId, birthdayId);
+                        } else if (data.startsWith('delete_')) {
+                            const birthdayId = data.replace('delete_', '');
+                            await this.deleteBirthday(chatId, birthdayId);
+                        } else {
+                            await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Неизвестная команда' });
+                            return;
+                        }
+                        break;
                 }
                 
                 // Подтверждаем получение callback
@@ -277,6 +305,12 @@ class BirthdayBot {
 
         // Пропускаем команды
         if (text.startsWith('/')) {
+            return;
+        }
+
+        // Проверяем, находится ли пользователь в режиме редактирования
+        if (this.editingBirthday && this.editingBirthday[chatId]) {
+            await this.handleEditBirthday(chatId, text);
             return;
         }
 
@@ -464,6 +498,50 @@ class BirthdayBot {
         }
     }
 
+    async handleEditBirthday(chatId, text) {
+        try {
+            const birthdayId = this.editingBirthday[chatId];
+            
+            const parsedData = this.messageParser.parseMessage(text);
+            
+            if (parsedData.error) {
+                await this.bot.sendMessage(chatId, `❌ ${parsedData.error}\n\nПопробуйте еще раз или нажмите "❌ Отмена"`);
+                return;
+            }
+
+            // Обновляем день рождения
+            const updated = await this.db.updateBirthday(
+                birthdayId,
+                parsedData.name,
+                parsedData.date,
+                parsedData.info
+            );
+
+            if (updated > 0) {
+                const message = `✅ День рождения успешно обновлен!\n\n👤 Имя: ${parsedData.name}\n📅 Дата: ${new Date(parsedData.date).toLocaleDateString('ru-RU')}\nℹ️ Информация: ${parsedData.info || 'Не указана'}`;
+                
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '📋 Мои дни рождения', callback_data: 'list' },
+                            { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                        ]
+                    ]
+                };
+                
+                await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+                
+                // Очищаем режим редактирования
+                delete this.editingBirthday[chatId];
+            } else {
+                await this.bot.sendMessage(chatId, '❌ Ошибка при обновлении дня рождения. Попробуйте еще раз.');
+            }
+        } catch (error) {
+            console.error('Error handling edit birthday:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при редактировании дня рождения.');
+        }
+    }
+
     // Методы для кнопок и команд
     async showMainMenu(chatId) {
         const welcomeMessage = `
@@ -477,6 +555,10 @@ class BirthdayBot {
                 [
                     { text: '📋 Мои дни рождения', callback_data: 'list' },
                     { text: '📝 Примеры', callback_data: 'example' }
+                ],
+                [
+                    { text: '✏️ Редактировать', callback_data: 'edit' },
+                    { text: '🗑️ Удалить', callback_data: 'delete' }
                 ],
                 [
                     { text: '❓ Помощь', callback_data: 'help' },
@@ -713,6 +795,178 @@ ${users.slice(0, 5).map((user, index) => {
         } catch (error) {
             console.error('Error showing stats:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка при получении статистики.');
+        }
+    }
+
+    async showEditMenu(chatId) {
+        try {
+            const birthdays = await this.db.getBirthdaysByChatId(chatId);
+            
+            if (birthdays.length === 0) {
+                const emptyMessage = '📅 У вас пока нет сохраненных дней рождения для редактирования.';
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '📝 Добавить день рождения', callback_data: 'example' },
+                            { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                        ]
+                    ]
+                };
+                await this.bot.sendMessage(chatId, emptyMessage, { reply_markup: keyboard });
+                return;
+            }
+
+            let message = '✏️ Выберите день рождения для редактирования:\n\n';
+            const keyboard = {
+                inline_keyboard: []
+            };
+
+            birthdays.forEach((birthday, index) => {
+                const date = new Date(birthday.birth_date).toLocaleDateString('ru-RU');
+                const info = birthday.info ? ` (${birthday.info})` : '';
+                message += `${index + 1}. ${birthday.name} - ${date}${info}\n`;
+                
+                keyboard.inline_keyboard.push([
+                    { 
+                        text: `✏️ ${birthday.name}`, 
+                        callback_data: `edit_${birthday.id}` 
+                    }
+                ]);
+            });
+
+            keyboard.inline_keyboard.push([
+                { text: '🏠 Главное меню', callback_data: 'main_menu' }
+            ]);
+
+            await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+        } catch (error) {
+            console.error('Error showing edit menu:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при загрузке списка для редактирования.');
+        }
+    }
+
+    async showDeleteMenu(chatId) {
+        try {
+            const birthdays = await this.db.getBirthdaysByChatId(chatId);
+            
+            if (birthdays.length === 0) {
+                const emptyMessage = '📅 У вас пока нет сохраненных дней рождения для удаления.';
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '📝 Добавить день рождения', callback_data: 'example' },
+                            { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                        ]
+                    ]
+                };
+                await this.bot.sendMessage(chatId, emptyMessage, { reply_markup: keyboard });
+                return;
+            }
+
+            let message = '🗑️ Выберите день рождения для удаления:\n\n';
+            const keyboard = {
+                inline_keyboard: []
+            };
+
+            birthdays.forEach((birthday, index) => {
+                const date = new Date(birthday.birth_date).toLocaleDateString('ru-RU');
+                const info = birthday.info ? ` (${birthday.info})` : '';
+                message += `${index + 1}. ${birthday.name} - ${date}${info}\n`;
+                
+                keyboard.inline_keyboard.push([
+                    { 
+                        text: `🗑️ ${birthday.name}`, 
+                        callback_data: `delete_${birthday.id}` 
+                    }
+                ]);
+            });
+
+            keyboard.inline_keyboard.push([
+                { text: '🏠 Главное меню', callback_data: 'main_menu' }
+            ]);
+
+            await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+        } catch (error) {
+            console.error('Error showing delete menu:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при загрузке списка для удаления.');
+        }
+    }
+
+    async showEditForm(chatId, birthdayId) {
+        try {
+            const birthday = await this.db.getBirthdayById(birthdayId);
+            
+            if (!birthday) {
+                await this.bot.sendMessage(chatId, '❌ День рождения не найден.');
+                return;
+            }
+
+            const date = new Date(birthday.birth_date).toLocaleDateString('ru-RU');
+            const message = `
+✏️ Редактирование дня рождения:
+
+👤 Имя: ${birthday.name}
+📅 Дата: ${date}
+ℹ️ Информация: ${birthday.info || 'Не указана'}
+
+Для изменения отправьте новое сообщение в формате:
+"Новое имя, новая дата, новая информация"
+
+Пример:
+"${birthday.name}, 15 марта 1990, обновленная информация"
+            `;
+
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '❌ Отмена', callback_data: 'edit' },
+                        { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                    ]
+                ]
+            };
+
+            await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+            
+            // Сохраняем ID для редактирования в сессии пользователя
+            this.editingBirthday = this.editingBirthday || {};
+            this.editingBirthday[chatId] = birthdayId;
+        } catch (error) {
+            console.error('Error showing edit form:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при загрузке формы редактирования.');
+        }
+    }
+
+    async deleteBirthday(chatId, birthdayId) {
+        try {
+            const birthday = await this.db.getBirthdayById(birthdayId);
+            
+            if (!birthday) {
+                await this.bot.sendMessage(chatId, '❌ День рождения не найден.');
+                return;
+            }
+
+            const success = await this.db.deleteBirthday(birthdayId);
+            
+            if (success) {
+                const date = new Date(birthday.birth_date).toLocaleDateString('ru-RU');
+                const message = `✅ День рождения "${birthday.name}" (${date}) успешно удален.`;
+                
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '📋 Мои дни рождения', callback_data: 'list' },
+                            { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                        ]
+                    ]
+                };
+                
+                await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+            } else {
+                await this.bot.sendMessage(chatId, '❌ Ошибка при удалении дня рождения.');
+            }
+        } catch (error) {
+            console.error('Error deleting birthday:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при удалении дня рождения.');
         }
     }
 

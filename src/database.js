@@ -251,6 +251,26 @@ export class SupabaseDatabase {
         }
     }
 
+    async getBirthdayById(id) {
+        try {
+            const { data, error } = await this.supabase
+                .from('birthdays')
+                .select('*')
+                .eq('id', id)
+                .single();
+
+            if (error) {
+                console.error('Error getting birthday by ID:', error);
+                return null;
+            }
+
+            return data;
+        } catch (error) {
+            console.error('Error getting birthday by ID:', error);
+            return null;
+        }
+    }
+
     async getBirthdayStats(chatId) {
         try {
             const { data, error } = await this.supabase
