@@ -19,7 +19,21 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users(chat_id);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
--- 3. Добавление внешнего ключа к таблице birthdays (если его еще нет)
+-- 3. Создание записей пользователей для существующих chat_id в таблице birthdays
+INSERT INTO users (chat_id, username, first_name, last_name, is_bot, language_code, last_activity)
+SELECT DISTINCT 
+    chat_id,
+    NULL as username,
+    NULL as first_name,
+    NULL as last_name,
+    FALSE as is_bot,
+    NULL as language_code,
+    NOW() as last_activity
+FROM birthdays 
+WHERE chat_id NOT IN (SELECT chat_id FROM users)
+ON CONFLICT (chat_id) DO NOTHING;
+
+-- 4. Добавление внешнего ключа к таблице birthdays (если его еще нет)
 DO $$ 
 BEGIN
     IF NOT EXISTS (
@@ -33,10 +47,10 @@ BEGIN
     END IF;
 END $$;
 
--- 4. Включение RLS для таблицы пользователей
+-- 5. Включение RLS для таблицы пользователей
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
--- 5. Создание политик безопасности для таблицы пользователей
+-- 6. Создание политик безопасности для таблицы пользователей
 DROP POLICY IF EXISTS "Users can view all users" ON users;
 CREATE POLICY "Users can view all users" ON users
     FOR SELECT USING (true);
@@ -49,7 +63,7 @@ DROP POLICY IF EXISTS "Users can update their own data" ON users;
 CREATE POLICY "Users can update their own data" ON users
     FOR UPDATE USING (true);
 
--- 6. Создание функции для upsert пользователей
+-- 7. Создание функции для upsert пользователей
 CREATE OR REPLACE FUNCTION upsert_user(
     p_chat_id BIGINT,
     p_username VARCHAR(255) DEFAULT NULL,
@@ -74,7 +88,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 7. Создание триггера для автоматического обновления updated_at в таблице users
+-- 8. Создание триггера для автоматического обновления updated_at в таблице users
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -90,7 +104,7 @@ CREATE TRIGGER update_users_updated_at
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
--- 8. Проверяем, что все создалось корректно
+-- 9. Проверяем, что все создалось корректно
 SELECT 'Таблица users создана успешно' as status;
 SELECT 'Функция upsert_user создана успешно' as status;
 SELECT 'Триггеры настроены успешно' as status;
