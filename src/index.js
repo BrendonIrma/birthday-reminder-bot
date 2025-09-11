@@ -37,9 +37,7 @@ class BirthdayBot {
             const chatId = msg.chat.id;
             
             // Очищаем режим редактирования при команде /start
-            if (this.editingBirthday && this.editingBirthday[chatId]) {
-                delete this.editingBirthday[chatId];
-            }
+            await this.clearEditingMode(chatId, 'Добро пожаловать в главное меню!');
             
             // Сохраняем информацию о пользователе
             await this.saveUserInfo(msg.from);
@@ -91,6 +89,9 @@ class BirthdayBot {
 
 /start - Начать работу с ботом
 /list - Показать список всех дней рождения
+/edit - Редактировать дни рождения
+/delete - Удалить день рождения
+/cancel - Отменить режим редактирования
 /format - Подсказка по форматам ввода
 /example - Готовые примеры для копирования
 /test_reminder - Тестировать систему напоминаний
@@ -234,6 +235,23 @@ class BirthdayBot {
             await this.showDeleteMenu(chatId);
         });
 
+        // Обработчик команды /cancel (отменить режим редактирования)
+        this.bot.onText(/\/cancel/, async (msg) => {
+            const chatId = msg.chat.id;
+            await this.clearEditingMode(chatId, 'Режим редактирования отменен по команде.');
+            
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '📋 Мои дни рождения', callback_data: 'list' },
+                        { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                    ]
+                ]
+            };
+            
+            await this.bot.sendMessage(chatId, '✅ Режим редактирования отменен. Выберите дальнейшее действие:', { reply_markup: keyboard });
+        });
+
         // Обработчик callback-запросов от inline-кнопок
         this.bot.on('callback_query', async (callbackQuery) => {
             const chatId = callbackQuery.message.chat.id;
@@ -244,72 +262,52 @@ class BirthdayBot {
                 switch (data) {
                     case 'list':
                         // Очищаем режим редактирования при просмотре списка
-                        if (this.editingBirthday && this.editingBirthday[chatId]) {
-                            delete this.editingBirthday[chatId];
-                        }
+                        await this.clearEditingMode(chatId, 'Переходим к просмотру списка дней рождения.');
                         await this.showBirthdayList(chatId);
                         break;
                     case 'example':
                         // Очищаем режим редактирования при просмотре примеров
-                        if (this.editingBirthday && this.editingBirthday[chatId]) {
-                            delete this.editingBirthday[chatId];
-                        }
+                        await this.clearEditingMode(chatId, 'Переходим к просмотру примеров.');
                         await this.showExamples(chatId);
                         break;
                     case 'help':
                         // Очищаем режим редактирования при просмотре помощи
-                        if (this.editingBirthday && this.editingBirthday[chatId]) {
-                            delete this.editingBirthday[chatId];
-                        }
+                        await this.clearEditingMode(chatId, 'Переходим к справке.');
                         await this.showHelp(chatId);
                         break;
                     case 'status':
                         // Очищаем режим редактирования при просмотре статуса
-                        if (this.editingBirthday && this.editingBirthday[chatId]) {
-                            delete this.editingBirthday[chatId];
-                        }
+                        await this.clearEditingMode(chatId, 'Переходим к просмотру статуса.');
                         await this.showStatus(chatId);
                         break;
                     case 'test_reminder':
                         // Очищаем режим редактирования при тестировании
-                        if (this.editingBirthday && this.editingBirthday[chatId]) {
-                            delete this.editingBirthday[chatId];
-                        }
+                        await this.clearEditingMode(chatId, 'Запускаем тест напоминаний.');
                         await this.testReminder(chatId);
                         break;
                     case 'format':
                         // Очищаем режим редактирования при просмотре форматов
-                        if (this.editingBirthday && this.editingBirthday[chatId]) {
-                            delete this.editingBirthday[chatId];
-                        }
+                        await this.clearEditingMode(chatId, 'Переходим к просмотру форматов.');
                         await this.showFormat(chatId);
                         break;
                     case 'stats':
                         // Очищаем режим редактирования при просмотре статистики
-                        if (this.editingBirthday && this.editingBirthday[chatId]) {
-                            delete this.editingBirthday[chatId];
-                        }
+                        await this.clearEditingMode(chatId, 'Переходим к просмотру статистики.');
                         await this.showStats(chatId);
                         break;
                     case 'edit':
                         // Очищаем режим редактирования при входе в меню редактирования
-                        if (this.editingBirthday && this.editingBirthday[chatId]) {
-                            delete this.editingBirthday[chatId];
-                        }
+                        await this.clearEditingMode(chatId, 'Переходим к меню редактирования.');
                         await this.showEditMenu(chatId);
                         break;
                     case 'delete':
                         // Очищаем режим редактирования при входе в меню удаления
-                        if (this.editingBirthday && this.editingBirthday[chatId]) {
-                            delete this.editingBirthday[chatId];
-                        }
+                        await this.clearEditingMode(chatId, 'Переходим к меню удаления.');
                         await this.showDeleteMenu(chatId);
                         break;
                     case 'main_menu':
                         // Очищаем режим редактирования при возврате в главное меню
-                        if (this.editingBirthday && this.editingBirthday[chatId]) {
-                            delete this.editingBirthday[chatId];
-                        }
+                        await this.clearEditingMode(chatId, 'Возвращаемся в главное меню.');
                         await this.showMainMenu(chatId);
                         break;
                     default:
@@ -556,7 +554,22 @@ class BirthdayBot {
             const parsedData = this.messageParser.parseMessage(text);
             
             if (parsedData.error) {
-                await this.bot.sendMessage(chatId, `❌ ${parsedData.error}\n\nПопробуйте еще раз или нажмите "❌ Отмена"`);
+                const errorMessage = `❌ ${parsedData.error}\n\n💡 Попробуйте еще раз или используйте кнопки для выхода из режима редактирования.`;
+                
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '⬅️ Назад к списку', callback_data: 'edit' },
+                            { text: '❌ Отмена', callback_data: 'main_menu' }
+                        ],
+                        [
+                            { text: '📋 Мои дни рождения', callback_data: 'list' },
+                            { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                        ]
+                    ]
+                };
+                
+                await this.bot.sendMessage(chatId, errorMessage, { reply_markup: keyboard });
                 return;
             }
 
@@ -569,12 +582,15 @@ class BirthdayBot {
             );
 
             if (updated > 0) {
-                const message = `✅ День рождения успешно обновлен!\n\n👤 Имя: ${parsedData.name}\n📅 Дата: ${new Date(parsedData.date).toLocaleDateString('ru-RU')}\nℹ️ Информация: ${parsedData.info || 'Не указана'}`;
+                const message = `✅ День рождения успешно обновлен!\n\n👤 Имя: ${parsedData.name}\n📅 Дата: ${new Date(parsedData.date).toLocaleDateString('ru-RU')}\nℹ️ Информация: ${parsedData.info || 'Не указана'}\n\n🔄 Режим редактирования завершен. Вы можете добавить новые дни рождения или редактировать существующие.`;
                 
                 const keyboard = {
                     inline_keyboard: [
                         [
                             { text: '📋 Мои дни рождения', callback_data: 'list' },
+                            { text: '✏️ Редактировать еще', callback_data: 'edit' }
+                        ],
+                        [
                             { text: '🏠 Главное меню', callback_data: 'main_menu' }
                         ]
                     ]
@@ -585,11 +601,36 @@ class BirthdayBot {
                 // Очищаем режим редактирования
                 delete this.editingBirthday[chatId];
             } else {
-                await this.bot.sendMessage(chatId, '❌ Ошибка при обновлении дня рождения. Попробуйте еще раз.');
+                const errorMessage = `❌ Ошибка при обновлении дня рождения.\n\n💡 Попробуйте еще раз или используйте кнопки для выхода из режима редактирования.`;
+                
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '⬅️ Назад к списку', callback_data: 'edit' },
+                            { text: '❌ Отмена', callback_data: 'main_menu' }
+                        ],
+                        [
+                            { text: '📋 Мои дни рождения', callback_data: 'list' },
+                            { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                        ]
+                    ]
+                };
+                
+                await this.bot.sendMessage(chatId, errorMessage, { reply_markup: keyboard });
             }
         } catch (error) {
             console.error('Error handling edit birthday:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка при редактировании дня рождения.');
+        }
+    }
+
+    // Метод для очистки режима редактирования с уведомлением
+    async clearEditingMode(chatId, reason = '') {
+        if (this.editingBirthday && this.editingBirthday[chatId]) {
+            delete this.editingBirthday[chatId];
+            if (reason) {
+                await this.bot.sendMessage(chatId, `🔄 Режим редактирования отменен. ${reason}`);
+            }
         }
     }
 
@@ -670,6 +711,9 @@ class BirthdayBot {
 
 /start - Начать работу с ботом
 /list - Показать список всех дней рождения
+/edit - Редактировать дни рождения
+/delete - Удалить день рождения
+/cancel - Отменить режим редактирования
 /format - Подсказка по форматам ввода
 /example - Готовые примеры для копирования
 /test_reminder - Тестировать систему напоминаний
@@ -960,17 +1004,25 @@ ${users.slice(0, 5).map((user, index) => {
 📅 Дата: ${date}
 ℹ️ Информация: ${birthday.info || 'Не указана'}
 
-Для изменения отправьте новое сообщение в формате:
+📝 Для изменения отправьте новое сообщение в формате:
 "Новое имя, новая дата, новая информация"
 
-Пример:
+💡 Пример:
 "${birthday.name}, 15 марта 1990, обновленная информация"
+
+⏰ Режим редактирования активен 5 минут, затем автоматически отключится.
+
+🔄 Для выхода из режима редактирования используйте кнопки ниже или любую команду.
             `;
 
             const keyboard = {
                 inline_keyboard: [
                     [
-                        { text: '❌ Отмена', callback_data: 'edit' },
+                        { text: '⬅️ Назад к списку', callback_data: 'edit' },
+                        { text: '❌ Отмена', callback_data: 'main_menu' }
+                    ],
+                    [
+                        { text: '📋 Мои дни рождения', callback_data: 'list' },
                         { text: '🏠 Главное меню', callback_data: 'main_menu' }
                     ]
                 ]
@@ -981,6 +1033,14 @@ ${users.slice(0, 5).map((user, index) => {
             // Сохраняем ID для редактирования в сессии пользователя
             this.editingBirthday = this.editingBirthday || {};
             this.editingBirthday[chatId] = birthdayId;
+            
+            // Устанавливаем таймаут для автоматического выхода из режима редактирования (5 минут)
+            setTimeout(() => {
+                if (this.editingBirthday && this.editingBirthday[chatId]) {
+                    delete this.editingBirthday[chatId];
+                    this.bot.sendMessage(chatId, '⏰ Режим редактирования автоматически отключен. Для повторного редактирования используйте команду /edit');
+                }
+            }, 5 * 60 * 1000); // 5 минут
         } catch (error) {
             console.error('Error showing edit form:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка при загрузке формы редактирования.');
