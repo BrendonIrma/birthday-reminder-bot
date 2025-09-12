@@ -5,29 +5,20 @@ dotenv.config();
 
 const parser = new MessageParser();
 
-// Проблемные случаи
-const problemCases = [
-    "15 марта Анна моя сестра",
-    "15 марта Анна",
-    "моя любимая сестра Анна родилась 15 марта 1990 года"
+// Тестируем порядковые числительные
+const testMessages = [
+    "Анна третьего марта моя сестра",
+    "Петр двадцатого декабря коллега"
 ];
 
-console.log('🔍 Отладка проблемных случаев\n');
+console.log('🧪 Тестирование порядковых числительных\n');
 
-problemCases.forEach((message, index) => {
+testMessages.forEach((message, index) => {
     console.log(`\n${index + 1}. Сообщение: "${message}"`);
-    
-    // Разбиваем на части
-    const parts = message.split(/[,.!?;]/).map(part => part.trim()).filter(part => part.length > 0);
-    console.log(`   Части: [${parts.join(', ')}]`);
     
     // Разбиваем на слова
     const words = message.split(/\s+/);
     console.log(`   Слова: [${words.join(', ')}]`);
-    
-    // Ищем дату
-    const dateMatch = parser.findDateInText(message);
-    console.log(`   Найденная дата: "${dateMatch}"`);
     
     // Проверяем каждое слово
     words.forEach((word, i) => {
@@ -35,6 +26,13 @@ problemCases.forEach((message, index) => {
         const isName = parser.isNamePart(word);
         console.log(`   Слово ${i}: "${word}" - дата: ${isDate}, имя: ${isName}`);
     });
+    
+    // Проверяем комбинации
+    for (let i = 0; i < words.length - 1; i++) {
+        const combined = words[i] + ' ' + words[i + 1];
+        const isDate = parser.isDatePart(combined);
+        console.log(`   Комбинация ${i}: "${combined}" - дата: ${isDate}`);
+    }
     
     const result = parser.parseMessage(message);
     if (result.error) {
@@ -45,3 +43,5 @@ problemCases.forEach((message, index) => {
         console.log(`   ✅ Информация: ${result.info || 'не указана'}`);
     }
 });
+
+console.log('\n🎉 Тестирование завершено!');
