@@ -216,7 +216,7 @@ class BirthdayBot {
             
             try {
                 // Запускаем проверку напоминаний вручную
-                await this.birthdayReminder.checkAndSendReminders();
+                await this.checkAndSendRemindersWithTracking();
                 await this.bot.sendMessage(chatId, '✅ Тестовая проверка завершена! Если есть дни рождения на сегодня - вы получили уведомления.');
             } catch (error) {
                 console.error('Error in test reminder:', error);
@@ -453,8 +453,7 @@ class BirthdayBot {
             return;
         }
 
-        // Проверяем напоминания только если они еще не были отправлены сегодня
-        await this.checkTodayBirthdays(chatId);
+        // Напоминания отправляются только через cron-задачу в 09:00
 
         try {
             const parsedData = this.messageParser.parseMessage(sanitizedText);
@@ -1079,7 +1078,7 @@ class BirthdayBot {
         
         try {
             // Запускаем проверку напоминаний вручную
-            await this.birthdayReminder.checkAndSendReminders();
+            await this.checkAndSendRemindersWithTracking();
             await this.bot.sendMessage(chatId, '✅ Тестовая проверка завершена! Если есть дни рождения на сегодня - вы получили уведомления.');
         } catch (error) {
             console.error('Error in test reminder:', error);
@@ -1477,13 +1476,51 @@ ${users.slice(0, 5).map((user, index) => {
             console.log('🔔 Cron: Checking birthdays at 09:00 MSK...');
             // Сбрасываем флаги напоминаний для всех пользователей
             this.sentReminders.clear();
-            await this.birthdayReminder.checkAndSendReminders();
+            await this.checkAndSendRemindersWithTracking();
         }, {
             scheduled: true,
             timezone: "Europe/Moscow"
         });
         
         console.log('✅ Cron jobs set up successfully - daily reminders at 09:00 MSK');
+    }
+
+    async checkAndSendRemindersWithTracking() {
+        try {
+            const today = new Date();
+            const month = today.getMonth() + 1;
+            const day = today.getDate();
+
+            console.log(`Checking birthdays for ${day}.${month}`);
+
+            const birthdays = await this.db.getBirthdaysByDate(month, day);
+            
+            if (birthdays.length === 0) {
+                console.log('No birthdays today');
+                return;
+            }
+
+            console.log(`Found ${birthdays.length} birthdays today`);
+
+            // Группируем дни рождения по пользователям
+            const birthdaysByUser = {};
+            for (const birthday of birthdays) {
+                if (!birthdaysByUser[birthday.chat_id]) {
+                    birthdaysByUser[birthday.chat_id] = [];
+                }
+                birthdaysByUser[birthday.chat_id].push(birthday);
+            }
+
+            // Отправляем напоминания каждому пользователю
+            for (const [chatId, userBirthdays] of Object.entries(birthdaysByUser)) {
+                for (const birthday of userBirthdays) {
+                    await this.sendInstantBirthdayMessage(chatId, birthday);
+                }
+            }
+
+        } catch (error) {
+            console.error('Error checking reminders:', error);
+        }
     }
 
     async start() {
