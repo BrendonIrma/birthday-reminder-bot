@@ -40,6 +40,24 @@ export class AIAssistant {
         }
     }
 
+    async generateMultipleGiftIdeas(name, info = '', count = 3) {
+        try {
+            if (!this.apiKey) {
+                return this.getDefaultMultipleGiftIdeas(name, count);
+            }
+
+            const prompt = this.buildMultipleGiftIdeasPrompt(name, info, count);
+            
+            const response = await this.callDeepSeek(prompt, `Ты помощник для предложения идей подарков на день рождения. Отвечай только на русском языке, будь креативным и практичным. Предложи ${count} разных идей подарков. Каждая идея на новой строке с эмодзи. Максимум 300 символов.`);
+
+            return this.formatMultipleGiftIdeas(response, count);
+
+        } catch (error) {
+            console.error('Error generating multiple gift ideas:', error);
+            return this.getDefaultMultipleGiftIdeas(name, count);
+        }
+    }
+
     async callDeepSeek(prompt, systemMessage) {
         try {
             const response = await fetch(this.apiUrl, {
@@ -102,6 +120,34 @@ export class AIAssistant {
         return prompt;
     }
 
+    buildMultipleGiftIdeasPrompt(name, info, count) {
+        let prompt = `Предложи ${count} разных идей подарков для ${name}.`;
+        
+        if (info) {
+            prompt += ` Информация: ${info}.`;
+        }
+        
+        prompt += ` Каждая идея на новой строке с эмодзи. Максимум 300 символов, на русском языке.`;
+        
+        return prompt;
+    }
+
+    formatMultipleGiftIdeas(response, count) {
+        // Разбиваем ответ на строки и форматируем
+        const lines = response.split('\n').filter(line => line.trim());
+        const formattedIdeas = lines.slice(0, count).map((line, index) => {
+            const cleanLine = line.trim();
+            // Если строка не начинается с эмодзи, добавляем его
+            if (!/^[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u.test(cleanLine)) {
+                const giftEmojis = ['🎁', '🎂', '🎈', '🌸', '📚', '🎵', '🏠', '☕', '🍫', '🎨'];
+                return `${giftEmojis[index % giftEmojis.length]} ${cleanLine}`;
+            }
+            return cleanLine;
+        });
+        
+        return formattedIdeas.join('\n');
+    }
+
     getDefaultCongratulations(name) {
         const congratulations = [
             `🎉 ${name}, с днем рождения! Здоровья, счастья и исполнения мечтаний! 🎂`,
@@ -122,6 +168,30 @@ export class AIAssistant {
         ];
         
         return giftIdeas[Math.floor(Math.random() * giftIdeas.length)];
+    }
+
+    getDefaultMultipleGiftIdeas(name, count = 3) {
+        const allGiftIdeas = [
+            `🎁 Книга - универсальный подарок`,
+            `🌸 Цветы - классический подарок`,
+            `🍰 Торт - сладкий подарок`,
+            `🎵 Музыкальный подарок`,
+            `🏠 Домашний декор`,
+            `☕ Подарочный сертификат в кафе`,
+            `🎨 Набор для творчества`,
+            `🍫 Шоколадный набор`,
+            `📱 Аксессуар для телефона`,
+            `🧸 Мягкая игрушка`,
+            `💄 Косметика`,
+            `👕 Одежда`,
+            `🏃‍♀️ Спортивные товары`,
+            `🎮 Игры и развлечения`,
+            `🌱 Комнатное растение`
+        ];
+        
+        // Перемешиваем массив и берем нужное количество
+        const shuffled = allGiftIdeas.sort(() => 0.5 - Math.random());
+        return shuffled.slice(0, count).join('\n');
     }
 
     // Дополнительный метод для генерации более персонализированных поздравлений

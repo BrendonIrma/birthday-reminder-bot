@@ -72,10 +72,11 @@ class BirthdayBot {
                         { text: '📝 Примеры', callback_data: 'example' }
                     ],
                     [
-                        { text: '❓ Помощь', callback_data: 'help' },
-                        { text: '📊 Статус', callback_data: 'status' }
+                        { text: '🎁 Идеи подарков', callback_data: 'gifts' },
+                        { text: '❓ Помощь', callback_data: 'help' }
                     ],
                     [
+                        { text: '📊 Статус', callback_data: 'status' },
                         { text: '🧪 Тест напоминаний', callback_data: 'test_reminder' }
                     ]
                 ]
@@ -220,6 +221,12 @@ class BirthdayBot {
             }
         });
 
+        // Обработчик команды /gifts (генерация идей подарков)
+        this.bot.onText(/\/gifts/, async (msg) => {
+            const chatId = msg.chat.id;
+            await this.showGiftIdeasMenu(chatId);
+        });
+
         // Обработчик команды /status (показать статус cron-задач)
         this.bot.onText(/\/status/, async (msg) => {
             const chatId = msg.chat.id;
@@ -308,6 +315,29 @@ class BirthdayBot {
                         // Очищаем режим редактирования при тестировании
                         await this.clearEditingMode(chatId, 'Запускаем тест напоминаний.');
                         await this.testReminder(chatId);
+                        break;
+                    case 'gifts':
+                        // Очищаем режим редактирования при просмотре идей подарков
+                        await this.clearEditingMode(chatId, 'Переходим к идеям подарков.');
+                        await this.showGiftIdeasMenu(chatId);
+                        break;
+                    case 'gifts_birthday':
+                        await this.generateGiftIdeas(chatId, 'день рождения', '');
+                        break;
+                    case 'gifts_universal':
+                        await this.generateGiftIdeas(chatId, 'универсальный подарок', '');
+                        break;
+                    case 'gifts_colleague':
+                        await this.generateGiftIdeas(chatId, 'коллега', 'работает в офисе');
+                        break;
+                    case 'gifts_family':
+                        await this.generateGiftIdeas(chatId, 'член семьи', 'близкий человек');
+                        break;
+                    case 'gifts_friend':
+                        await this.generateGiftIdeas(chatId, 'друг', 'хороший друг');
+                        break;
+                    case 'gifts_child':
+                        await this.generateGiftIdeas(chatId, 'ребенок', 'маленький ребенок');
                         break;
                     case 'format':
                         // Очищаем режим редактирования при просмотре форматов
@@ -531,12 +561,12 @@ class BirthdayBot {
             const name = birthday.name;
             const info = birthday.info || '';
 
-            // Генерируем поздравление и идею подарка
+            // Генерируем поздравление и несколько идей подарков
             const congratulations = await this.aiAssistant.generateCongratulations(name, info);
-            const giftIdea = await this.aiAssistant.generateGiftIdea(name, info);
+            const giftIdeas = await this.aiAssistant.generateMultipleGiftIdeas(name, info, 3);
 
             // Создаем объединенное сообщение
-            const combinedMessage = this.createCombinedMessage(name, congratulations, giftIdea);
+            const combinedMessage = this.createCombinedMessage(name, congratulations, giftIdeas);
             await this.bot.sendMessage(chatId, combinedMessage);
 
         } catch (error) {
@@ -544,7 +574,7 @@ class BirthdayBot {
         }
     }
 
-    createCombinedMessage(name, congratulations, giftIdea) {
+    createCombinedMessage(name, congratulations, giftIdeas) {
         let message = `🎉 Сегодня день рождения у ${name}!\n\n`;
         
         // Добавляем поздравление
@@ -552,43 +582,44 @@ class BirthdayBot {
             message += `💌 ${congratulations}\n\n`;
         }
         
-        // Добавляем идею подарка
-        if (giftIdea) {
-            message += `🎁 ${giftIdea}`;
+        // Добавляем идеи подарков
+        if (giftIdeas) {
+            message += `🎁 Идеи подарков:\n${giftIdeas}`;
         }
         
-        // Ограничиваем до 400 символов
-        if (message.length > 400) {
-            // Если сообщение слишком длинное, сокращаем поздравление и идею подарка
+        // Ограничиваем до 500 символов (увеличили лимит для нескольких идей)
+        if (message.length > 500) {
+            // Если сообщение слишком длинное, сокращаем поздравление и идеи подарков
             const baseMessage = `🎉 Сегодня день рождения у ${name}!\n\n`;
-            const availableSpace = 400 - baseMessage.length;
+            const availableSpace = 500 - baseMessage.length;
             
             let congratulationsText = '';
-            let giftIdeaText = '';
+            let giftIdeasText = '';
             
-            if (congratulations && giftIdea) {
-                // Распределяем место поровну между поздравлением и идеей подарка
-                const spacePerPart = Math.floor(availableSpace / 2) - 10; // 10 символов на эмодзи и переносы
+            if (congratulations && giftIdeas) {
+                // Распределяем место: 40% на поздравление, 60% на идеи подарков
+                const congratulationsSpace = Math.floor(availableSpace * 0.4) - 10;
+                const giftIdeasSpace = Math.floor(availableSpace * 0.6) - 10;
                 
-                congratulationsText = congratulations.length > spacePerPart 
-                    ? congratulations.substring(0, spacePerPart - 3) + '...'
+                congratulationsText = congratulations.length > congratulationsSpace 
+                    ? congratulations.substring(0, congratulationsSpace - 3) + '...'
                     : congratulations;
                     
-                giftIdeaText = giftIdea.length > spacePerPart 
-                    ? giftIdea.substring(0, spacePerPart - 3) + '...'
-                    : giftIdea;
+                giftIdeasText = giftIdeas.length > giftIdeasSpace 
+                    ? giftIdeas.substring(0, giftIdeasSpace - 3) + '...'
+                    : giftIdeas;
                     
-                message = `${baseMessage}💌 ${congratulationsText}\n\n🎁 ${giftIdeaText}`;
+                message = `${baseMessage}💌 ${congratulationsText}\n\n🎁 Идеи подарков:\n${giftIdeasText}`;
             } else if (congratulations) {
                 congratulationsText = congratulations.length > availableSpace - 5
                     ? congratulations.substring(0, availableSpace - 8) + '...'
                     : congratulations;
                 message = `${baseMessage}💌 ${congratulationsText}`;
-            } else if (giftIdea) {
-                giftIdeaText = giftIdea.length > availableSpace - 5
-                    ? giftIdea.substring(0, availableSpace - 8) + '...'
-                    : giftIdea;
-                message = `${baseMessage}🎁 ${giftIdeaText}`;
+            } else if (giftIdeas) {
+                giftIdeasText = giftIdeas.length > availableSpace - 5
+                    ? giftIdeas.substring(0, availableSpace - 8) + '...'
+                    : giftIdeas;
+                message = `${baseMessage}🎁 Идеи подарков:\n${giftIdeasText}`;
             }
         }
         
@@ -793,7 +824,9 @@ class BirthdayBot {
         // Разрешенные callback данные
         const allowedCallbacks = [
             'list', 'example', 'help', 'status', 'test_reminder', 'format', 
-            'stats', 'edit', 'delete', 'main_menu'
+            'stats', 'edit', 'delete', 'main_menu', 'gifts',
+            'gifts_birthday', 'gifts_universal', 'gifts_colleague', 
+            'gifts_family', 'gifts_friend', 'gifts_child'
         ];
         
         // Проверяем, что это разрешенный callback
@@ -826,15 +859,18 @@ class BirthdayBot {
                     { text: '📝 Примеры', callback_data: 'example' }
                 ],
                 [
-                    { text: '✏️ Редактировать', callback_data: 'edit' },
-                    { text: '🗑️ Удалить', callback_data: 'delete' }
+                    { text: '🎁 Идеи подарков', callback_data: 'gifts' },
+                    { text: '✏️ Редактировать', callback_data: 'edit' }
                 ],
                 [
-                    { text: '❓ Помощь', callback_data: 'help' },
-                    { text: '📊 Статус', callback_data: 'status' }
+                    { text: '🗑️ Удалить', callback_data: 'delete' },
+                    { text: '❓ Помощь', callback_data: 'help' }
                 ],
                 [
-                    { text: '📈 Статистика', callback_data: 'stats' },
+                    { text: '📊 Статус', callback_data: 'status' },
+                    { text: '📈 Статистика', callback_data: 'stats' }
+                ],
+                [
                     { text: '🧪 Тест напоминаний', callback_data: 'test_reminder' }
                 ]
             ]
@@ -887,9 +923,10 @@ class BirthdayBot {
 📋 Доступные команды:
 
 /start - Начать работу с ботом
-/list - Показать список всех дней рождения
+/list - Показать список всех дней рождения (отсортированы по дате)
 /edit - Редактировать дни рождения
 /delete - Удалить день рождения
+/gifts - Генератор идей подарков
 /cancel - Отменить режим редактирования
 /format - Подсказка по форматам ввода
 /example - Готовые примеры для копирования
@@ -911,6 +948,11 @@ class BirthdayBot {
 • 3 марта (текстовый)
 • 15 мая 1990
 • марта 3
+
+🎁 Новые возможности:
+• Несколько идей подарков в напоминаниях
+• Генератор идей подарков по категориям
+• Сортировка дней рождения по дате
 
 ❌ Неправильно: "20 декабря, Мария, моя мама"
 ✅ Правильно: "Мария, 20 декабря, моя мама"
@@ -1276,17 +1318,25 @@ ${users.slice(0, 5).map((user, index) => {
                 return;
             }
 
-            let message = '📅 Ваши дни рождения:\n\n';
-            birthdays.forEach((birthday, index) => {
+            // Сортируем дни рождения по дате следующего дня рождения
+            const sortedBirthdays = birthdays.map(birthday => {
                 const nextBirthday = this.birthdayReminder.getNextBirthday(birthday.birth_date);
                 const daysUntil = this.birthdayReminder.getDaysUntilBirthday(nextBirthday);
-                
+                return {
+                    ...birthday,
+                    nextBirthday,
+                    daysUntil
+                };
+            }).sort((a, b) => a.daysUntil - b.daysUntil);
+
+            let message = '📅 Ваши дни рождения (отсортированы по дате):\n\n';
+            sortedBirthdays.forEach((birthday, index) => {
                 message += `${index + 1}. ${birthday.name} - ${birthday.birth_date}`;
                 if (birthday.info) {
                     message += ` (${birthday.info})`;
                 }
-                message += `\n   📅 Следующий день рождения: ${nextBirthday.format('DD.MM.YYYY')}`;
-                message += `\n   ⏰ Через ${daysUntil} дней\n\n`;
+                message += `\n   📅 Следующий день рождения: ${birthday.nextBirthday.format('DD.MM.YYYY')}`;
+                message += `\n   ⏰ Через ${birthday.daysUntil} дней\n\n`;
             });
 
             const keyboard = {
@@ -1302,6 +1352,63 @@ ${users.slice(0, 5).map((user, index) => {
         } catch (error) {
             console.error('Error showing birthday list:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка при получении списка дней рождения.');
+        }
+    }
+
+    async showGiftIdeasMenu(chatId) {
+        const message = `
+🎁 Генератор идей подарков
+
+Выберите, для кого вы хотите получить идеи подарков:
+
+💡 Я могу предложить несколько вариантов подарков на основе информации о человеке!
+        `;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '🎂 Для дня рождения', callback_data: 'gifts_birthday' },
+                    { text: '🎈 Универсальные идеи', callback_data: 'gifts_universal' }
+                ],
+                [
+                    { text: '👨‍💼 Для коллеги', callback_data: 'gifts_colleague' },
+                    { text: '👨‍👩‍👧‍👦 Для семьи', callback_data: 'gifts_family' }
+                ],
+                [
+                    { text: '👫 Для друга/подруги', callback_data: 'gifts_friend' },
+                    { text: '👶 Для ребенка', callback_data: 'gifts_child' }
+                ],
+                [
+                    { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                ]
+            ]
+        };
+        
+        await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+    }
+
+    async generateGiftIdeas(chatId, occasion, info) {
+        try {
+            await this.bot.sendMessage(chatId, '🎁 Генерирую идеи подарков...');
+            
+            const giftIdeas = await this.aiAssistant.generateMultipleGiftIdeas(occasion, info, 5);
+            
+            const message = `🎁 Идеи подарков для ${occasion}:\n\n${giftIdeas}`;
+            
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '🔄 Другие идеи', callback_data: 'gifts' },
+                        { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                    ]
+                ]
+            };
+            
+            await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+            
+        } catch (error) {
+            console.error('Error generating gift ideas:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при генерации идей подарков.');
         }
     }
 

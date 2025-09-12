@@ -40,12 +40,12 @@ export class BirthdayReminder {
             const name = birthday.name;
             const info = birthday.info || '';
 
-            // Генерируем поздравление и идею подарка
+            // Генерируем поздравление и несколько идей подарков
             const congratulations = await this.aiAssistant.generateCongratulations(name, info);
-            const giftIdea = await this.aiAssistant.generateGiftIdea(name, info);
+            const giftIdeas = await this.aiAssistant.generateMultipleGiftIdeas(name, info, 3);
 
             // Создаем объединенное сообщение
-            const combinedMessage = this.createCombinedMessage(name, congratulations, giftIdea);
+            const combinedMessage = this.createCombinedMessage(name, congratulations, giftIdeas);
             await this.bot.sendMessage(chatId, combinedMessage);
 
             console.log(`Sent birthday reminder for ${name} to chat ${chatId}`);
@@ -55,7 +55,7 @@ export class BirthdayReminder {
         }
     }
 
-    createCombinedMessage(name, congratulations, giftIdea) {
+    createCombinedMessage(name, congratulations, giftIdeas) {
         let message = `🎉 Сегодня день рождения у ${name}!\n\n`;
         
         // Добавляем поздравление
@@ -63,43 +63,44 @@ export class BirthdayReminder {
             message += `💌 ${congratulations}\n\n`;
         }
         
-        // Добавляем идею подарка
-        if (giftIdea) {
-            message += `🎁 ${giftIdea}`;
+        // Добавляем идеи подарков
+        if (giftIdeas) {
+            message += `🎁 Идеи подарков:\n${giftIdeas}`;
         }
         
-        // Ограничиваем до 400 символов
-        if (message.length > 400) {
-            // Если сообщение слишком длинное, сокращаем поздравление и идею подарка
+        // Ограничиваем до 500 символов (увеличили лимит для нескольких идей)
+        if (message.length > 500) {
+            // Если сообщение слишком длинное, сокращаем поздравление и идеи подарков
             const baseMessage = `🎉 Сегодня день рождения у ${name}!\n\n`;
-            const availableSpace = 400 - baseMessage.length;
+            const availableSpace = 500 - baseMessage.length;
             
             let congratulationsText = '';
-            let giftIdeaText = '';
+            let giftIdeasText = '';
             
-            if (congratulations && giftIdea) {
-                // Распределяем место поровну между поздравлением и идеей подарка
-                const spacePerPart = Math.floor(availableSpace / 2) - 10; // 10 символов на эмодзи и переносы
+            if (congratulations && giftIdeas) {
+                // Распределяем место: 40% на поздравление, 60% на идеи подарков
+                const congratulationsSpace = Math.floor(availableSpace * 0.4) - 10;
+                const giftIdeasSpace = Math.floor(availableSpace * 0.6) - 10;
                 
-                congratulationsText = congratulations.length > spacePerPart 
-                    ? congratulations.substring(0, spacePerPart - 3) + '...'
+                congratulationsText = congratulations.length > congratulationsSpace 
+                    ? congratulations.substring(0, congratulationsSpace - 3) + '...'
                     : congratulations;
                     
-                giftIdeaText = giftIdea.length > spacePerPart 
-                    ? giftIdea.substring(0, spacePerPart - 3) + '...'
-                    : giftIdea;
+                giftIdeasText = giftIdeas.length > giftIdeasSpace 
+                    ? giftIdeas.substring(0, giftIdeasSpace - 3) + '...'
+                    : giftIdeas;
                     
-                message = `${baseMessage}💌 ${congratulationsText}\n\n🎁 ${giftIdeaText}`;
+                message = `${baseMessage}💌 ${congratulationsText}\n\n🎁 Идеи подарков:\n${giftIdeasText}`;
             } else if (congratulations) {
                 congratulationsText = congratulations.length > availableSpace - 5
                     ? congratulations.substring(0, availableSpace - 8) + '...'
                     : congratulations;
                 message = `${baseMessage}💌 ${congratulationsText}`;
-            } else if (giftIdea) {
-                giftIdeaText = giftIdea.length > availableSpace - 5
-                    ? giftIdea.substring(0, availableSpace - 8) + '...'
-                    : giftIdea;
-                message = `${baseMessage}🎁 ${giftIdeaText}`;
+            } else if (giftIdeas) {
+                giftIdeasText = giftIdeas.length > availableSpace - 5
+                    ? giftIdeas.substring(0, availableSpace - 8) + '...'
+                    : giftIdeas;
+                message = `${baseMessage}🎁 Идеи подарков:\n${giftIdeasText}`;
             }
         }
         
