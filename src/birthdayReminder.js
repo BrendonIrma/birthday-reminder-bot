@@ -114,8 +114,8 @@ export class BirthdayReminder {
         // Устанавливаем год на текущий
         let nextBirthday = birthMoment.clone().year(today.year());
         
-        // Если день рождения уже прошел в этом году, берем следующий год
-        if (nextBirthday.isBefore(today, 'day')) {
+        // Если день рождения уже прошел в этом году (включая сегодня, если он уже был), берем следующий год
+        if (nextBirthday.isSameOrBefore(today, 'day')) {
             nextBirthday = nextBirthday.add(1, 'year');
         }
         
