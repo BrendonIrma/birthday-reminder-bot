@@ -90,6 +90,9 @@ class BirthdayBot {
                     [
                         { text: '📊 Статус', callback_data: 'status' },
                         { text: '🧪 Тест напоминаний', callback_data: 'test_reminder' }
+                    ],
+                    [
+                        { text: '⚡ Список команд', callback_data: 'commands' }
                     ]
                 ]
             };
@@ -358,6 +361,11 @@ class BirthdayBot {
                         // Очищаем режим редактирования при просмотре статистики
                         await this.clearEditingMode(chatId, 'Переходим к просмотру статистики.');
                         await this.showStats(chatId);
+                        break;
+                    case 'commands':
+                        // Очищаем режим редактирования при просмотре команд
+                        await this.clearEditingMode(chatId, 'Переходим к списку команд.');
+                        await this.showCommands(chatId);
                         break;
                     case 'edit':
                         // Очищаем режим редактирования при входе в меню редактирования
@@ -927,7 +935,7 @@ class BirthdayBot {
         // Разрешенные callback данные
         const allowedCallbacks = [
             'list', 'example', 'help', 'status', 'test_reminder', 'format', 
-            'stats', 'edit', 'delete', 'main_menu', 'gifts',
+            'stats', 'edit', 'delete', 'main_menu', 'gifts', 'commands',
             'gifts_birthday', 'gifts_universal', 'gifts_colleague', 
             'gifts_family', 'gifts_friend', 'gifts_child'
         ];
@@ -974,7 +982,8 @@ class BirthdayBot {
                     { text: '📈 Статистика', callback_data: 'stats' }
                 ],
                 [
-                    { text: '🧪 Тест напоминаний', callback_data: 'test_reminder' }
+                    { text: '🧪 Тест напоминаний', callback_data: 'test_reminder' },
+                    { text: '⚡ Список команд', callback_data: 'commands' }
                 ]
             ]
         };
@@ -1211,6 +1220,51 @@ ${users.slice(0, 5).map((user, index) => {
             console.error('Error showing stats:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка при получении статистики.');
         }
+    }
+
+    async showCommands(chatId) {
+        const commandsMessage = `
+⚡ Список команд бота:
+
+🔧 ОСНОВНЫЕ КОМАНДЫ:
+/start - Начать работу с ботом
+/list - Показать список всех дней рождения
+/help - Показать справку по использованию
+
+✏️ РЕДАКТИРОВАНИЕ:
+/edit - Редактировать дни рождения
+/delete - Удалить день рождения
+/cancel - Отменить режим редактирования
+
+📝 ИНФОРМАЦИЯ:
+/format - Подсказка по форматам ввода
+/example - Готовые примеры для копирования
+/commands - Показать этот список команд
+
+🎁 ДОПОЛНИТЕЛЬНО:
+/gifts - Генератор идей подарков
+/status - Показать статус системы
+/test_reminder - Тестировать систему напоминаний
+/stats - Показать статистику пользователей
+
+💡 СОВЕТ:
+Просто начните печатать "/" и Telegram покажет доступные команды!
+        `;
+
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📋 Мои дни рождения', callback_data: 'list' },
+                    { text: '❓ Помощь', callback_data: 'help' }
+                ],
+                [
+                    { text: '📝 Примеры', callback_data: 'example' },
+                    { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                ]
+            ]
+        };
+
+        await this.bot.sendMessage(chatId, commandsMessage, { reply_markup: keyboard });
     }
 
     async showEditMenu(chatId) {
