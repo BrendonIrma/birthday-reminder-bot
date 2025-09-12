@@ -28,6 +28,9 @@ class BirthdayBot {
         this.MAX_MESSAGE_LENGTH = 1000; // максимум символов в сообщении
         this.MAX_BIRTHDAYS_PER_USER = 100; // максимум дней рождения на пользователя
         
+        // Система отслеживания отправленных напоминаний
+        this.sentReminders = new Map(); // chatId -> { date, sent: boolean }
+        
         this.setupHandlers();
         this.setupCronJobs();
         this.setupHttpServer();
@@ -450,7 +453,7 @@ class BirthdayBot {
             return;
         }
 
-        // Сначала проверяем, есть ли сегодня дни рождения у пользователя
+        // Проверяем напоминания только если они еще не были отправлены сегодня
         await this.checkTodayBirthdays(chatId);
 
         try {
@@ -526,6 +529,14 @@ class BirthdayBot {
     async checkTodayBirthdays(chatId) {
         try {
             const today = new Date();
+            const todayString = today.toDateString(); // Получаем строку даты для сравнения
+            
+            // Проверяем, были ли уже отправлены напоминания сегодня
+            const reminderData = this.sentReminders.get(chatId);
+            if (reminderData && reminderData.date === todayString && reminderData.sent) {
+                return; // Напоминания уже отправлены сегодня
+            }
+
             const month = today.getMonth() + 1;
             const day = today.getDate();
 
@@ -534,6 +545,8 @@ class BirthdayBot {
             const birthdays = await this.db.getBirthdaysByDate(month, day);
             
             if (birthdays.length === 0) {
+                // Отмечаем, что проверка была выполнена, даже если дней рождения нет
+                this.sentReminders.set(chatId, { date: todayString, sent: false });
                 return; // Нет дней рождения сегодня
             }
 
@@ -541,6 +554,8 @@ class BirthdayBot {
             const userBirthdays = birthdays.filter(birthday => birthday.chat_id === chatId);
             
             if (userBirthdays.length === 0) {
+                // Отмечаем, что проверка была выполнена, даже если у пользователя нет дней рождения
+                this.sentReminders.set(chatId, { date: todayString, sent: false });
                 return; // У этого пользователя нет дней рождения сегодня
             }
 
@@ -550,6 +565,9 @@ class BirthdayBot {
             for (const birthday of userBirthdays) {
                 await this.sendInstantBirthdayMessage(chatId, birthday);
             }
+
+            // Отмечаем, что напоминания были отправлены сегодня
+            this.sentReminders.set(chatId, { date: todayString, sent: true });
 
         } catch (error) {
             console.error('Error checking today birthdays:', error);
@@ -1457,6 +1475,8 @@ ${users.slice(0, 5).map((user, index) => {
         // Проверяем дни рождения каждый день в 09:00 по московскому времени
         cron.schedule('0 9 * * *', async () => {
             console.log('🔔 Cron: Checking birthdays at 09:00 MSK...');
+            // Сбрасываем флаги напоминаний для всех пользователей
+            this.sentReminders.clear();
             await this.birthdayReminder.checkAndSendReminders();
         }, {
             scheduled: true,
