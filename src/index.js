@@ -1428,7 +1428,10 @@ ${users.slice(0, 5).map((user, index) => {
                     nextBirthday,
                     daysUntil
                 };
-            }).sort((a, b) => a.daysUntil - b.daysUntil);
+            }).sort((a, b) => {
+                // Сортируем по дате следующего дня рождения (timestamp)
+                return a.nextBirthday.valueOf() - b.nextBirthday.valueOf();
+            });
 
             let message = '📅 Ваши дни рождения (отсортированы по дате):\n\n';
             sortedBirthdays.forEach((birthday, index) => {
