@@ -4,6 +4,32 @@ export class MessageParser {
     constructor() {
         // Настройка локали для moment.js
         moment.locale('ru');
+        
+        // Кэш для регулярных выражений
+        this.regexCache = new Map();
+        this.initRegexCache();
+    }
+
+    initRegexCache() {
+        // Предкомпилируем часто используемые регулярные выражения
+        this.regexCache.set('datePatterns', [
+            /\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}/g,
+            /\d{1,2}[.\-/]\d{1,2}/g,
+            /\d+\s+[а-яё]+/gi,
+            /[а-яё]+\s+\d+/gi
+        ]);
+        
+        this.regexCache.set('suspiciousPatterns', [
+            /<script/i,
+            /javascript:/i,
+            /on\w+\s*=/i,
+            /eval\s*\(/i,
+            /function\s*\(/i
+        ]);
+        
+        this.regexCache.set('repeatedChars', /(.)\1{20,}/);
+        this.regexCache.set('onlyDigits', /^\d+$/);
+        this.regexCache.set('hasLetters', /[а-яёa-z]/i);
     }
 
     parseMessage(text) {
@@ -381,7 +407,7 @@ export class MessageParser {
         }
         
         // Проверяем, что содержит буквы (русские или латинские)
-        if (!/[а-яёa-z]/i.test(part)) {
+        if (!this.regexCache.get('hasLetters').test(part)) {
             return false;
         }
         
@@ -391,7 +417,7 @@ export class MessageParser {
         }
         
         // Имя не должно содержать только цифры
-        if (/^\d+$/.test(part)) {
+        if (this.regexCache.get('onlyDigits').test(part)) {
             return false;
         }
         
@@ -422,15 +448,8 @@ export class MessageParser {
     }
 
     findDateInText(text) {
-        // Ищем дату в тексте с помощью регулярных выражений
-        const datePatterns = [
-            // Числовые форматы
-            /\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}/g,
-            /\d{1,2}[.\-/]\d{1,2}/g,
-            // Текстовые форматы с числом и месяцем
-            /\d+\s+[а-яё]+/gi,
-            /[а-яё]+\s+\d+/gi
-        ];
+        // Ищем дату в тексте с помощью кэшированных регулярных выражений
+        const datePatterns = this.regexCache.get('datePatterns');
         
         for (const pattern of datePatterns) {
             const matches = text.match(pattern);

@@ -31,6 +31,14 @@ class BirthdayBot {
         // Система отслеживания отправленных напоминаний
         this.sentReminders = new Map(); // chatId -> { date, sent: boolean }
         
+        // Кэш для пользователей (чтобы не обновлять базу при каждом сообщении)
+        this.userCache = new Map(); // chatId -> { lastUpdate, userData }
+        this.USER_CACHE_TTL = 5 * 60 * 1000; // 5 минут
+        
+        // Кэш для лимитов дней рождения
+        this.birthdayCountCache = new Map(); // chatId -> { count, lastUpdate }
+        this.BIRTHDAY_CACHE_TTL = 2 * 60 * 1000; // 2 минуты
+        
         this.setupHandlers();
         this.setupCronJobs();
         this.setupHttpServer();
@@ -442,7 +450,7 @@ class BirthdayBot {
         // Логируем все сообщения от пользователей
         console.log(`📱 Message from @${username} (${chatId}): ${sanitizedText}`);
 
-        // Пропускаем команды
+        // Быстрая проверка команд - пропускаем без дополнительной обработки
         if (sanitizedText.startsWith('/')) {
             return;
         }
@@ -463,10 +471,10 @@ class BirthdayBot {
                 return;
             }
 
-            // Проверяем лимит дней рождения на пользователя
-            const userBirthdays = await this.db.getBirthdaysByChatId(chatId);
-            if (userBirthdays.length >= this.MAX_BIRTHDAYS_PER_USER) {
-                this.logSuspiciousActivity(chatId, username, 'BIRTHDAY_LIMIT_EXCEEDED', `Current count: ${userBirthdays.length}`);
+            // Проверяем лимит дней рождения на пользователя (с кэшированием)
+            const birthdayCount = await this.getBirthdayCount(chatId);
+            if (birthdayCount >= this.MAX_BIRTHDAYS_PER_USER) {
+                this.logSuspiciousActivity(chatId, username, 'BIRTHDAY_LIMIT_EXCEEDED', `Current count: ${birthdayCount}`);
                 await this.bot.sendMessage(chatId, `❌ Достигнут лимит дней рождения (${this.MAX_BIRTHDAYS_PER_USER}). Удалите некоторые записи, чтобы добавить новые.`);
                 return;
             }
@@ -483,6 +491,14 @@ class BirthdayBot {
                 // Логируем добавление дня рождения
                 console.log(`🎂 Added birthday: ${parsedData.name} (${parsedData.originalDate}) for @${username} (${chatId})`);
                 
+                // Обновляем кэш количества дней рождения
+                const cached = this.birthdayCountCache.get(chatId);
+                if (cached) {
+                    cached.count += 1;
+                    cached.lastUpdate = Date.now();
+                    this.birthdayCountCache.set(chatId, cached);
+                }
+                
                 // Проверяем, является ли добавленный день рождения сегодняшним
                 const today = new Date();
                 const month = today.getMonth() + 1;
@@ -495,9 +511,12 @@ class BirthdayBot {
                 if (month === addedMonth && day === addedDay) {
                     // Если добавленный день рождения сегодня - отправляем мгновенное поздравление
                     console.log(`🎉 Instant birthday notification sent to @${username} for ${parsedData.name}`);
-                    await this.sendInstantBirthdayMessage(chatId, {
+                    // Отправляем мгновенное поздравление асинхронно
+                    this.sendInstantBirthdayMessage(chatId, {
                         name: parsedData.name,
                         info: parsedData.info || ''
+                    }).catch(error => {
+                        console.error('Error sending instant birthday message:', error);
                     });
                 } else {
                     // Обычное подтверждение
@@ -578,16 +597,38 @@ class BirthdayBot {
             const name = birthday.name;
             const info = birthday.info || '';
 
-            // Генерируем поздравление и несколько идей подарков
-            const congratulations = await this.aiAssistant.generateCongratulations(name, info);
-            const giftIdeas = await this.aiAssistant.generateMultipleGiftIdeas(name, info, 3);
+            // Сначала отправляем быстрое сообщение
+            const quickMessage = `🎉 Сегодня день рождения у ${name}!\n\n💌 ${name}, с днем рождения! Пусть этот день будет особенным! 🎂\n\n🎁 Идеи подарков генерируются...`;
+            await this.bot.sendMessage(chatId, quickMessage);
 
-            // Создаем объединенное сообщение
-            const combinedMessage = this.createCombinedMessage(name, congratulations, giftIdeas);
-            await this.bot.sendMessage(chatId, combinedMessage);
+            // Затем асинхронно генерируем персонализированный контент
+            this.generateAndSendPersonalizedContent(chatId, name, info).catch(error => {
+                console.error('Error generating personalized content:', error);
+            });
 
         } catch (error) {
             console.error('Error sending instant birthday message:', error);
+        }
+    }
+
+    async generateAndSendPersonalizedContent(chatId, name, info) {
+        try {
+            // Генерируем поздравление и идеи подарков параллельно
+            const [congratulations, giftIdeas] = await Promise.all([
+                this.aiAssistant.generateCongratulations(name, info),
+                this.aiAssistant.generateMultipleGiftIdeas(name, info, 3)
+            ]);
+
+            // Создаем персонализированное сообщение
+            const personalizedMessage = this.createCombinedMessage(name, congratulations, giftIdeas);
+            
+            // Отправляем персонализированное сообщение
+            await this.bot.sendMessage(chatId, personalizedMessage);
+
+        } catch (error) {
+            console.error('Error generating personalized content:', error);
+            // В случае ошибки отправляем простое сообщение
+            await this.bot.sendMessage(chatId, `🎁 Идеи подарков для ${name}:\n🎂 Торт\n🎁 Подарок\n🌸 Цветы`);
         }
     }
 
@@ -643,18 +684,64 @@ class BirthdayBot {
         return message;
     }
 
-    // Метод для сохранения информации о пользователе
+    // Метод для получения количества дней рождения с кэшированием
+    async getBirthdayCount(chatId) {
+        try {
+            const now = Date.now();
+            const cached = this.birthdayCountCache.get(chatId);
+            
+            if (cached && (now - cached.lastUpdate) < this.BIRTHDAY_CACHE_TTL) {
+                return cached.count;
+            }
+            
+            const userBirthdays = await this.db.getBirthdaysByChatId(chatId);
+            const count = userBirthdays.length;
+            
+            // Обновляем кэш
+            this.birthdayCountCache.set(chatId, {
+                count: count,
+                lastUpdate: now
+            });
+            
+            return count;
+        } catch (error) {
+            console.error('Error getting birthday count:', error);
+            return 0;
+        }
+    }
+
+    // Метод для сохранения информации о пользователе с кэшированием
     async saveUserInfo(user) {
         try {
             const chatId = user.id;
+            const now = Date.now();
+            
+            // Проверяем кэш
+            const cached = this.userCache.get(chatId);
+            if (cached && (now - cached.lastUpdate) < this.USER_CACHE_TTL) {
+                // Обновляем только активность, если пользователь в кэше
+                this.db.updateUserActivity(chatId).catch(error => {
+                    console.error('Error updating user activity:', error);
+                });
+                return;
+            }
+
             const username = user.username || null;
             const firstName = user.first_name || null;
             const lastName = user.last_name || null;
             const isBot = user.is_bot || false;
             const languageCode = user.language_code || null;
 
+            // Сохраняем в базу данных
             await this.db.upsertUser(chatId, username, firstName, lastName, isBot, languageCode);
             await this.db.updateUserActivity(chatId);
+            
+            // Обновляем кэш
+            this.userCache.set(chatId, {
+                lastUpdate: now,
+                userData: { username, firstName, lastName, isBot, languageCode }
+            });
+            
         } catch (error) {
             console.error('Error saving user info:', error);
         }
