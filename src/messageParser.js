@@ -43,7 +43,75 @@ export class MessageParser {
 
     smartParse(text) {
         try {
-            // Разбиваем текст на части по запятым, точкам, восклицательным знакам
+            // Сначала пробуем найти дату в исходном тексте
+            const dateMatch = this.findDateInText(text);
+            if (dateMatch) {
+                // Если нашли дату, разбиваем текст вокруг неё
+                const dateIndex = text.indexOf(dateMatch);
+                const beforeDate = text.substring(0, dateIndex).trim();
+                const afterDate = text.substring(dateIndex + dateMatch.length).trim();
+                
+                // Очищаем от запятых и точек
+                const beforeParts = beforeDate.split(/[,.!?;]/).map(part => part.trim()).filter(part => part.length > 0);
+                const afterParts = afterDate.split(/[,.!?;]/).map(part => part.trim()).filter(part => part.length > 0);
+                
+                // Ищем имя в части до даты (приоритет) или после даты
+                let name = '';
+                let info = '';
+                
+                // Собираем всех кандидатов на имя
+                const allCandidates = [];
+                beforeParts.forEach(part => {
+                    if (this.isNamePart(part)) {
+                        allCandidates.push({
+                            name: part,
+                            length: part.length,
+                            position: 'before',
+                            index: beforeParts.indexOf(part)
+                        });
+                    }
+                });
+                afterParts.forEach(part => {
+                    if (this.isNamePart(part)) {
+                        allCandidates.push({
+                            name: part,
+                            length: part.length,
+                            position: 'after',
+                            index: afterParts.indexOf(part)
+                        });
+                    }
+                });
+                
+                if (allCandidates.length > 0) {
+                    // Сортируем кандидатов: сначала по длине (короткие в приоритете), 
+                    // затем по позиции (после даты в приоритете для коротких имен)
+                    allCandidates.sort((a, b) => {
+                        if (a.length !== b.length) {
+                            return a.length - b.length; // Сначала короткие
+                        }
+                        // При одинаковой длине приоритет у тех, что после даты
+                        if (a.position !== b.position) {
+                            return a.position === 'after' ? -1 : 1;
+                        }
+                        return a.index - b.index;
+                    });
+                    
+                    name = allCandidates[0].name;
+                }
+                
+                // Собираем информацию из оставшихся частей
+                const allParts = [...beforeParts, ...afterParts];
+                const infoParts = allParts.filter(part => part !== name && !this.isDatePart(part));
+                info = infoParts.join(', ');
+                
+                return {
+                    name: name,
+                    dateStr: dateMatch,
+                    info: info
+                };
+            }
+            
+            // Если не нашли дату в тексте, используем старую логику
             const parts = text.split(/[,.!?;]/).map(part => part.trim()).filter(part => part.length > 0);
             
             // Если нет разделителей, разбиваем по пробелам
@@ -86,21 +154,44 @@ export class MessageParser {
             let dateStr = '';
             let info = '';
 
+            // Сначала находим дату
             for (let i = 0; i < parts.length; i++) {
                 const part = parts[i];
-                
-                // Проверяем, является ли часть датой
                 if (this.isDatePart(part)) {
-                    if (!dateStr) {
-                        dateStr = part;
-                    }
+                    dateStr = part;
+                    break;
                 }
-                // Проверяем, является ли часть именем (если еще не найдено)
-                else if (!name && this.isNamePart(part)) {
-                    name = part;
+            }
+
+            // Затем ищем имя - приоритизируем короткие имена
+            const nameCandidates = [];
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                if (!this.isDatePart(part) && this.isNamePart(part)) {
+                    nameCandidates.push({
+                        name: part,
+                        length: part.length,
+                        index: i
+                    });
                 }
-                // Остальное - информация
-                else {
+            }
+
+            // Сортируем кандидатов по длине (короткие имена в приоритете)
+            nameCandidates.sort((a, b) => {
+                if (a.length !== b.length) {
+                    return a.length - b.length; // Сначала короткие
+                }
+                return a.index - b.index; // При одинаковой длине - по порядку
+            });
+
+            if (nameCandidates.length > 0) {
+                name = nameCandidates[0].name;
+            }
+
+            // Остальное - информация
+            for (let i = 0; i < parts.length; i++) {
+                const part = parts[i];
+                if (!this.isDatePart(part) && part !== name) {
                     if (info) {
                         info += ', ' + part;
                     } else {
