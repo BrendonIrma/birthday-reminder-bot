@@ -182,19 +182,27 @@ export class SupabaseDatabase {
 
     async getBirthdaysByDate(month, day) {
         try {
-            // Supabase использует PostgreSQL, поэтому можем использовать SQL функции
+            // Получаем все дни рождения и фильтруем на клиенте
             const { data, error } = await this.supabase
                 .from('birthdays')
-                .select('*')
-                .eq('extract(month from birth_date)', month)
-                .eq('extract(day from birth_date)', day);
+                .select('*');
 
             if (error) {
                 console.error('Error getting birthdays by date:', error);
                 return [];
             }
 
-            return data || [];
+            if (!data) return [];
+
+            // Фильтруем дни рождения на клиенте
+            const filteredBirthdays = data.filter(birthday => {
+                const birthDate = new Date(birthday.birth_date);
+                const birthMonth = birthDate.getMonth() + 1; // JavaScript месяцы начинаются с 0
+                const birthDay = birthDate.getDate();
+                return birthMonth === month && birthDay === day;
+            });
+
+            return filteredBirthdays;
 
         } catch (error) {
             console.error('Error getting birthdays by date:', error);
