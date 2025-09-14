@@ -39,6 +39,9 @@ class BirthdayBot {
         this.birthdayCountCache = new Map(); // chatId -> { count, lastUpdate }
         this.BIRTHDAY_CACHE_TTL = 2 * 60 * 1000; // 2 минуты
         
+        // Режим ввода информации о человеке для идей подарков
+        this.customGiftInput = new Map(); // chatId -> { name, info }
+        
         this.setupHandlers();
         this.setupCronJobs();
         this.setupHttpServer();
@@ -356,6 +359,9 @@ class BirthdayBot {
                     case 'gifts_child':
                         await this.generateGiftIdeas(chatId, 'ребенок', 'маленький ребенок');
                         break;
+                    case 'gifts_custom':
+                        await this.showCustomGiftInput(chatId);
+                        break;
                     case 'format':
                         // Очищаем режим редактирования при просмотре форматов
                         await this.clearEditingMode(chatId, 'Переходим к просмотру форматов.');
@@ -469,6 +475,12 @@ class BirthdayBot {
         // Проверяем, находится ли пользователь в режиме редактирования
         if (this.editingBirthday && this.editingBirthday[chatId]) {
             await this.handleEditBirthday(chatId, sanitizedText);
+            return;
+        }
+
+        // Проверяем, находится ли пользователь в режиме ввода информации о подарках
+        if (this.customGiftInput && this.customGiftInput.has(chatId)) {
+            await this.handleCustomGiftInput(chatId, sanitizedText);
             return;
         }
 
@@ -609,7 +621,7 @@ class BirthdayBot {
             const info = birthday.info || '';
 
             // Сначала отправляем быстрое сообщение
-            const quickMessage = `🎉 Сегодня день рождения у ${name}!\n\n💌 ${name}, с днем рождения! Пусть этот день будет особенным! 🎂\n\n🎁 Идеи подарков генерируются...`;
+            const quickMessage = `🎉 Сегодня день рождения у ${name}!\n\n⏳ Поздравление и идеи подарков генерируются...`;
             await this.bot.sendMessage(chatId, quickMessage);
 
             // Затем асинхронно генерируем персонализированный контент
@@ -644,23 +656,25 @@ class BirthdayBot {
     }
 
     createCombinedMessage(name, congratulations, giftIdeas) {
-        let message = `🎉 Сегодня день рождения у ${name}!\n\n`;
+        let message = '';
         
         // Добавляем поздравление
         if (congratulations) {
-            message += `💌 ${congratulations}\n\n`;
+            message += `💌 ${congratulations}`;
         }
         
         // Добавляем идеи подарков
         if (giftIdeas) {
+            if (message) {
+                message += '\n\n';
+            }
             message += `🎁 Идеи подарков:\n${giftIdeas}`;
         }
         
         // Ограничиваем до 500 символов (увеличили лимит для нескольких идей)
         if (message.length > 500) {
             // Если сообщение слишком длинное, сокращаем поздравление и идеи подарков
-            const baseMessage = `🎉 Сегодня день рождения у ${name}!\n\n`;
-            const availableSpace = 500 - baseMessage.length;
+            const availableSpace = 500;
             
             let congratulationsText = '';
             let giftIdeasText = '';
@@ -678,17 +692,17 @@ class BirthdayBot {
                     ? giftIdeas.substring(0, giftIdeasSpace - 3) + '...'
                     : giftIdeas;
                     
-                message = `${baseMessage}💌 ${congratulationsText}\n\n🎁 Идеи подарков:\n${giftIdeasText}`;
+                message = `💌 ${congratulationsText}\n\n🎁 Идеи подарков:\n${giftIdeasText}`;
             } else if (congratulations) {
                 congratulationsText = congratulations.length > availableSpace - 5
                     ? congratulations.substring(0, availableSpace - 8) + '...'
                     : congratulations;
-                message = `${baseMessage}💌 ${congratulationsText}`;
+                message = `💌 ${congratulationsText}`;
             } else if (giftIdeas) {
                 giftIdeasText = giftIdeas.length > availableSpace - 5
                     ? giftIdeas.substring(0, availableSpace - 8) + '...'
                     : giftIdeas;
-                message = `${baseMessage}🎁 Идеи подарков:\n${giftIdeasText}`;
+                message = `🎁 Идеи подарков:\n${giftIdeasText}`;
             }
         }
         
@@ -842,6 +856,11 @@ class BirthdayBot {
             if (reason) {
                 await this.bot.sendMessage(chatId, `🔄 Режим редактирования отменен. ${reason}`);
             }
+        }
+        
+        // Также очищаем режим ввода информации о подарках
+        if (this.customGiftInput && this.customGiftInput.has(chatId)) {
+            this.customGiftInput.delete(chatId);
         }
     }
 
@@ -1543,6 +1562,9 @@ ${users.slice(0, 5).map((user, index) => {
                     { text: '👶 Для ребенка', callback_data: 'gifts_child' }
                 ],
                 [
+                    { text: '✏️ Ввести информацию о человеке', callback_data: 'gifts_custom' }
+                ],
+                [
                     { text: '🏠 Главное меню', callback_data: 'main_menu' }
                 ]
             ]
@@ -1573,6 +1595,86 @@ ${users.slice(0, 5).map((user, index) => {
         } catch (error) {
             console.error('Error generating gift ideas:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка при генерации идей подарков.');
+        }
+    }
+
+    async showCustomGiftInput(chatId) {
+        const message = `
+✏️ Введите информацию о человеке для генерации персонализированных идей подарков
+
+📝 Формат: Имя, дополнительная информация
+
+Примеры:
+• "Анна, моя сестра, любит рисовать"
+• "Сергей, коллега, программист, увлекается спортом"
+• "Мама, 55 лет, любит цветы и книги"
+
+💡 Чем больше информации вы предоставите, тем лучше будут идеи подарков!
+        `;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '❌ Отмена', callback_data: 'gifts' }
+                ]
+            ]
+        };
+        
+        // Устанавливаем режим ввода информации о подарках
+        this.customGiftInput.set(chatId, { step: 'name' });
+        
+        await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+    }
+
+    async handleCustomGiftInput(chatId, text) {
+        try {
+            const inputData = this.customGiftInput.get(chatId);
+            
+            if (!inputData) {
+                // Если режим не активен, очищаем его
+                this.customGiftInput.delete(chatId);
+                return;
+            }
+
+            // Парсим введенную информацию
+            const parts = text.split(',').map(part => part.trim());
+            const name = parts[0];
+            const info = parts.slice(1).join(', ');
+
+            if (!name || name.length < 2) {
+                await this.bot.sendMessage(chatId, '❌ Пожалуйста, введите имя человека (минимум 2 символа).');
+                return;
+            }
+
+            // Генерируем идеи подарков
+            await this.bot.sendMessage(chatId, `🎁 Генерирую персонализированные идеи подарков для ${name}...`);
+            
+            const giftIdeas = await this.aiAssistant.generateMultipleGiftIdeas(name, info, 5);
+            
+            const message = `🎁 Персонализированные идеи подарков для ${name}:\n\n${giftIdeas}`;
+            
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '🔄 Другие идеи', callback_data: 'gifts_custom' },
+                        { text: '🎁 Все идеи', callback_data: 'gifts' }
+                    ],
+                    [
+                        { text: '🏠 Главное меню', callback_data: 'main_menu' }
+                    ]
+                ]
+            };
+            
+            await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+            
+            // Очищаем режим ввода
+            this.customGiftInput.delete(chatId);
+            
+        } catch (error) {
+            console.error('Error handling custom gift input:', error);
+            await this.bot.sendMessage(chatId, '❌ Ошибка при генерации идей подарков.');
+            // Очищаем режим ввода в случае ошибки
+            this.customGiftInput.delete(chatId);
         }
     }
 
