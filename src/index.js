@@ -450,14 +450,6 @@ class BirthdayBot {
             return;
         }
 
-        // Валидируем сообщение
-        const validation = this.validateMessage(text);
-        if (!validation.valid) {
-            this.logSuspiciousActivity(chatId, username, 'INVALID_MESSAGE', validation.error);
-            await this.bot.sendMessage(chatId, validation.error);
-            return;
-        }
-
         // Санитизируем текст
         const sanitizedText = this.security.sanitizeText(text);
 
@@ -481,6 +473,14 @@ class BirthdayBot {
         // Проверяем, находится ли пользователь в режиме ввода информации о подарках
         if (this.customGiftInput && this.customGiftInput.has(chatId)) {
             await this.handleCustomGiftInput(chatId, sanitizedText);
+            return;
+        }
+
+        // Валидируем сообщение только если это не специальные режимы
+        const validation = this.validateMessage(text);
+        if (!validation.valid) {
+            this.logSuspiciousActivity(chatId, username, 'INVALID_MESSAGE', validation.error);
+            await this.bot.sendMessage(chatId, validation.error);
             return;
         }
 
@@ -1542,9 +1542,9 @@ ${users.slice(0, 5).map((user, index) => {
         const message = `
 🎁 Генератор идей подарков
 
-Выберите, для кого вы хотите получить идеи подарков:
-
 💡 Я могу предложить несколько вариантов подарков на основе информации о человеке!
+
+Выберите, для кого вы хотите получить идеи подарков:
         `;
         
         const keyboard = {
