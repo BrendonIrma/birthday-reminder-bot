@@ -21,7 +21,9 @@ export class SupabaseDatabase {
                 throw error;
             }
 
+            if (process.env.NODE_ENV === 'development') {
             console.log('Connected to Supabase successfully');
+        }
         } catch (error) {
             console.error('Failed to initialize Supabase:', error);
             throw error;
@@ -45,7 +47,9 @@ export class SupabaseDatabase {
                 return false;
             }
 
+            if (process.env.NODE_ENV === 'development') {
             console.log(`User upserted: ${username || firstName || chatId}`);
+        }
             return true;
         } catch (error) {
             console.error('Failed to upsert user:', error);
@@ -130,7 +134,9 @@ export class SupabaseDatabase {
                 return null;
             }
 
+            if (process.env.NODE_ENV === 'development') {
             console.log(`Added birthday for ${name} (ID: ${data[0].id})`);
+        }
             return data[0].id;
 
         } catch (error) {
@@ -228,7 +234,9 @@ export class SupabaseDatabase {
                 return 0;
             }
 
+            if (process.env.NODE_ENV === 'development') {
             console.log(`Updated birthday ID: ${id}`);
+        }
             return data.length;
 
         } catch (error) {
@@ -250,7 +258,9 @@ export class SupabaseDatabase {
                 return 0;
             }
 
+            if (process.env.NODE_ENV === 'development') {
             console.log(`Deleted birthday ID: ${id}`);
+        }
             return data.length;
 
         } catch (error) {

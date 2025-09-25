@@ -457,7 +457,9 @@ class BirthdayBot {
         await this.saveUserInfo(msg.from);
 
         // Логируем все сообщения от пользователей
-        console.log(`📱 Message from @${username} (${chatId}): ${sanitizedText}`);
+        if (process.env.NODE_ENV === 'development') {
+            console.log(`📱 Message from @${username} (${chatId}): ${sanitizedText}`);
+        }
 
         // Быстрая проверка команд - пропускаем без дополнительной обработки
         if (sanitizedText.startsWith('/')) {
@@ -512,7 +514,9 @@ class BirthdayBot {
 
             if (birthdayId) {
                 // Логируем добавление дня рождения
-                console.log(`🎂 Added birthday: ${parsedData.name} (${parsedData.originalDate}) for @${username} (${chatId})`);
+                if (process.env.NODE_ENV === 'development') {
+            console.log(`🎂 Added birthday: ${parsedData.name} (${parsedData.originalDate}) for @${username} (${chatId})`);
+        }
                 
                 // Обновляем кэш количества дней рождения
                 const cached = this.birthdayCountCache.get(chatId);
@@ -533,7 +537,9 @@ class BirthdayBot {
                 
                 if (month === addedMonth && day === addedDay) {
                     // Если добавленный день рождения сегодня - отправляем мгновенное поздравление
-                    console.log(`🎉 Instant birthday notification sent to @${username} for ${parsedData.name}`);
+                    if (process.env.NODE_ENV === 'development') {
+            console.log(`🎉 Instant birthday notification sent to @${username} for ${parsedData.name}`);
+        }
                     // Отправляем мгновенное поздравление асинхронно
                     this.sendInstantBirthdayMessage(chatId, {
                         name: parsedData.name,
@@ -557,7 +563,9 @@ class BirthdayBot {
                     await this.bot.sendMessage(chatId, confirmationMessage, { reply_markup: keyboard });
                 }
             } else {
-                console.log(`❌ Failed to add birthday for @${username}: ${parsedData.name}`);
+                if (process.env.NODE_ENV === 'development') {
+            console.log(`❌ Failed to add birthday for @${username}: ${parsedData.name}`);
+        }
                 await this.bot.sendMessage(chatId, '❌ Произошла ошибка при сохранении данных.');
             }
 
@@ -581,7 +589,9 @@ class BirthdayBot {
             const month = today.getMonth() + 1;
             const day = today.getDate();
 
+            if (process.env.NODE_ENV === 'development') {
             console.log(`Checking today's birthdays for chat ${chatId}: ${day}.${month}`);
+        }
 
             const birthdays = await this.db.getBirthdaysByDate(month, day);
             
@@ -600,7 +610,9 @@ class BirthdayBot {
                 return; // У этого пользователя нет дней рождения сегодня
             }
 
+            if (process.env.NODE_ENV === 'development') {
             console.log(`Found ${userBirthdays.length} birthdays today for chat ${chatId}`);
+        }
 
             // Отправляем поздравления для каждого дня рождения
             for (const birthday of userBirthdays) {

@@ -14,16 +14,22 @@ export class BirthdayReminder {
             const month = today.month() + 1; // moment.js месяцы начинаются с 0
             const day = today.date();
 
+            if (process.env.NODE_ENV === 'development') {
             console.log(`Checking birthdays for ${day}.${month}`);
+        }
 
             const birthdays = await this.db.getBirthdaysByDate(month, day);
             
             if (birthdays.length === 0) {
-                console.log('No birthdays today');
+                if (process.env.NODE_ENV === 'development') {
+            console.log('No birthdays today');
+        }
                 return;
             }
 
+            if (process.env.NODE_ENV === 'development') {
             console.log(`Found ${birthdays.length} birthdays today`);
+        }
 
             for (const birthday of birthdays) {
                 await this.sendBirthdayReminder(birthday);
@@ -48,7 +54,9 @@ export class BirthdayReminder {
             const combinedMessage = this.createCombinedMessage(name, congratulations, giftIdeas);
             await this.bot.sendMessage(chatId, combinedMessage);
 
+            if (process.env.NODE_ENV === 'development') {
             console.log(`Sent birthday reminder for ${name} to chat ${chatId}`);
+        }
 
         } catch (error) {
             console.error(`Error sending reminder for ${birthday.name}:`, error);
