@@ -1,5 +1,7 @@
+# Используем официальный Node.js образ
 FROM node:18-alpine
 
+# Устанавливаем рабочую директорию
 WORKDIR /app
 
 # Копируем package.json и package-lock.json
@@ -13,18 +15,14 @@ COPY src/ ./src/
 
 # Создаем пользователя для безопасности
 RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nextjs -u 1001
+RUN adduser -S nodejs -u 1001
 
 # Меняем владельца файлов
-RUN chown -R nextjs:nodejs /app
-USER nextjs
+RUN chown -R nodejs:nodejs /app
+USER nodejs
 
-# Открываем порт
+# Открываем порт (если понадобится для health check)
 EXPOSE 3000
 
-# Проверяем, что приложение запускается
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"
-
-# Запускаем приложение
+# Команда запуска
 CMD ["npm", "start"]
