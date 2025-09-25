@@ -8,6 +8,7 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "setup": "node scripts/setup.js",
+    "build": "echo 'No build step required'",
     "audit": "npm audit",
     "audit-fix": "npm audit fix",
     "security-check": "npm audit --audit-level=moderate"
