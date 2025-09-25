@@ -960,7 +960,7 @@ class BirthdayBot {
             'list', 'example', 'help', 'status', 'test_reminder', 'format', 
             'stats', 'edit', 'delete', 'main_menu', 'gifts', 'commands',
             'gifts_birthday', 'gifts_universal', 'gifts_colleague', 
-            'gifts_family', 'gifts_friend', 'gifts_child'
+            'gifts_family', 'gifts_friend', 'gifts_child', 'gifts_custom'
         ];
         
         // Проверяем, что это разрешенный callback
