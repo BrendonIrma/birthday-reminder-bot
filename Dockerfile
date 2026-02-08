@@ -1,28 +1,20 @@
 # Используем официальный Node.js образ
-FROM node:18-alpine
+FROM node:20-alpine
 
-# Устанавливаем рабочую директорию
+# 👉 добавляем CA сертификаты
+RUN apk add --no-cache ca-certificates
+
 WORKDIR /app
 
-# Копируем package.json и package-lock.json
 COPY package*.json ./
-
-# Устанавливаем зависимости
 RUN npm ci --only=production
 
-# Копируем исходный код
-COPY src/ ./src/
+COPY . .
 
-# Создаем пользователя для безопасности
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nodejs -u 1001
+RUN addgroup -g 1001 -S nodejs \
+ && adduser -S nodejs -u 1001
 
-# Меняем владельца файлов
 RUN chown -R nodejs:nodejs /app
 USER nodejs
 
-# Открываем порт (если понадобится для health check)
-EXPOSE 3000
-
-# Команда запуска
 CMD ["npm", "start"]
