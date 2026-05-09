@@ -8,6 +8,8 @@ import { MessageParser } from './messageParser.js';
 import { BirthdayReminder } from './birthdayReminder.js';
 import { AIAssistant } from './aiAssistant.js';
 import { SecurityUtils } from './security.js';
+import { generateGiftIdeas } from './ai/giftIdeasService.js';
+import { buildMarketplaceLinks } from './utils/marketplaceLinks.js';
 
 // Загружаем переменные окружения
 dotenv.config();
@@ -20,28 +22,32 @@ class BirthdayBot {
         this.birthdayReminder = new BirthdayReminder(this.bot, this.db);
         this.aiAssistant = new AIAssistant();
         this.security = new SecurityUtils();
-        
+
         // Система защиты от спама
         this.userRequests = new Map(); // chatId -> { count, resetTime }
         this.RATE_LIMIT = 10; // максимум запросов в минуту
         this.RATE_WINDOW = 60 * 1000; // окно в миллисекундах (1 минута)
         this.MAX_MESSAGE_LENGTH = 1000; // максимум символов в сообщении
         this.MAX_BIRTHDAYS_PER_USER = 100; // максимум дней рождения на пользователя
-        
+
         // Система отслеживания отправленных напоминаний
         this.sentReminders = new Map(); // chatId -> { date, sent: boolean }
-        
+
         // Кэш для пользователей (чтобы не обновлять базу при каждом сообщении)
         this.userCache = new Map(); // chatId -> { lastUpdate, userData }
         this.USER_CACHE_TTL = 5 * 60 * 1000; // 5 минут
-        
+
         // Кэш для лимитов дней рождения
         this.birthdayCountCache = new Map(); // chatId -> { count, lastUpdate }
         this.BIRTHDAY_CACHE_TTL = 2 * 60 * 1000; // 2 минуты
-        
-        // Режим ввода информации о человеке для идей подарков
+
+        // Режим ввода информации о человеке для идей подарков (старый flow)
         this.customGiftInput = new Map(); // chatId -> { name, info }
-        
+
+        // Новый диалоговый flow подбора подарка
+        // chatId -> { step: 'relation'|'interests'|'budget', relation, interests, budget }
+        this.smartGiftFlow = new Map();
+
         this.setupHandlers();
         this.setupCronJobs();
         this.setupHttpServer();
@@ -58,10 +64,10 @@ class BirthdayBot {
         // Обработчик команды /start
         this.bot.onText(/\/start/, async (msg) => {
             const chatId = msg.chat.id;
-            
+
             // Очищаем режим редактирования при команде /start
             await this.clearEditingMode(chatId, 'Добро пожаловать в главное меню!');
-            
+
             // Сохраняем информацию о пользователе
             await this.saveUserInfo(msg.from);
             const welcomeMessage = `
@@ -79,7 +85,7 @@ class BirthdayBot {
 
 💡 Если добавите день рождения на сегодня - сразу получите поздравление!
             `;
-            
+
             const keyboard = {
                 inline_keyboard: [
                     [
@@ -99,7 +105,7 @@ class BirthdayBot {
                     ]
                 ]
             };
-            
+
             await this.bot.sendMessage(chatId, welcomeMessage, { reply_markup: keyboard });
         });
 
@@ -230,7 +236,7 @@ class BirthdayBot {
         this.bot.onText(/\/test_reminder/, async (msg) => {
             const chatId = msg.chat.id;
             await this.bot.sendMessage(chatId, '🔍 Запускаю тестовую проверку напоминаний...');
-            
+
             try {
                 // Запускаем проверку напоминаний вручную
                 await this.checkAndSendRemindersWithTracking();
@@ -275,7 +281,7 @@ class BirthdayBot {
         this.bot.onText(/\/cancel/, async (msg) => {
             const chatId = msg.chat.id;
             await this.clearEditingMode(chatId, 'Режим редактирования отменен по команде.');
-            
+
             const keyboard = {
                 inline_keyboard: [
                     [
@@ -284,7 +290,7 @@ class BirthdayBot {
                     ]
                 ]
             };
-            
+
             await this.bot.sendMessage(chatId, '✅ Режим редактирования отменен. Выберите дальнейшее действие:', { reply_markup: keyboard });
         });
 
@@ -339,7 +345,13 @@ class BirthdayBot {
                     case 'gifts':
                         // Очищаем режим редактирования при просмотре идей подарков
                         await this.clearEditingMode(chatId, 'Переходим к идеям подарков.');
+                        this.smartGiftFlow.delete(chatId);
                         await this.showGiftIdeasMenu(chatId);
+                        break;
+                    case 'gift_smart':
+                        // Новый умный flow подбора подарка
+                        await this.clearEditingMode(chatId, 'Переходим к подбору подарка.');
+                        await this.startSmartGiftFlow(chatId);
                         break;
                     case 'gifts_birthday':
                         await this.generateGiftIdeas(chatId, 'день рождения', '');
@@ -412,10 +424,10 @@ class BirthdayBot {
                         }
                         break;
                 }
-                
+
                 // Подтверждаем получение callback
                 await this.bot.answerCallbackQuery(callbackQuery.id);
-                
+
             } catch (error) {
                 console.error('Error handling callback query:', error);
                 await this.bot.answerCallbackQuery(callbackQuery.id, { text: 'Произошла ошибка' });
@@ -470,6 +482,12 @@ class BirthdayBot {
             return;
         }
 
+        // Проверяем новый умный flow подбора подарка
+        if (this.smartGiftFlow && this.smartGiftFlow.has(chatId)) {
+            await this.handleSmartGiftFlowInput(chatId, sanitizedText);
+            return;
+        }
+
         // Проверяем, находится ли пользователь в режиме ввода информации о подарках
         if (this.customGiftInput && this.customGiftInput.has(chatId)) {
             await this.handleCustomGiftInput(chatId, sanitizedText);
@@ -488,7 +506,7 @@ class BirthdayBot {
 
         try {
             const parsedData = this.messageParser.parseMessage(sanitizedText);
-            
+
             if (parsedData.error) {
                 await this.bot.sendMessage(chatId, `❌ ${parsedData.error}`);
                 return;
@@ -513,7 +531,7 @@ class BirthdayBot {
             if (birthdayId) {
                 // Логируем добавление дня рождения
                 console.log(`🎂 Added birthday: ${parsedData.name} (${parsedData.originalDate}) for @${username} (${chatId})`);
-                
+
                 // Обновляем кэш количества дней рождения
                 const cached = this.birthdayCountCache.get(chatId);
                 if (cached) {
@@ -521,16 +539,16 @@ class BirthdayBot {
                     cached.lastUpdate = Date.now();
                     this.birthdayCountCache.set(chatId, cached);
                 }
-                
+
                 // Проверяем, является ли добавленный день рождения сегодняшним
                 const today = new Date();
                 const month = today.getMonth() + 1;
                 const day = today.getDate();
-                
+
                 const addedBirthday = new Date(parsedData.date);
                 const addedMonth = addedBirthday.getMonth() + 1;
                 const addedDay = addedBirthday.getDate();
-                
+
                 if (month === addedMonth && day === addedDay) {
                     // Если добавленный день рождения сегодня - отправляем мгновенное поздравление
                     console.log(`🎉 Instant birthday notification sent to @${username} for ${parsedData.name}`);
@@ -544,7 +562,7 @@ class BirthdayBot {
                 } else {
                     // Обычное подтверждение
                     const confirmationMessage = `✅ Отлично! Я запомнил день рождения ${parsedData.name} (${parsedData.originalDate}). Буду напоминать вам об этом! 🎂`;
-                    
+
                     const keyboard = {
                         inline_keyboard: [
                             [
@@ -553,7 +571,7 @@ class BirthdayBot {
                             ]
                         ]
                     };
-                    
+
                     await this.bot.sendMessage(chatId, confirmationMessage, { reply_markup: keyboard });
                 }
             } else {
@@ -571,7 +589,7 @@ class BirthdayBot {
         try {
             const today = new Date();
             const todayString = today.toDateString(); // Получаем строку даты для сравнения
-            
+
             // Проверяем, были ли уже отправлены напоминания сегодня
             const reminderData = this.sentReminders.get(chatId);
             if (reminderData && reminderData.date === todayString && reminderData.sent) {
@@ -584,7 +602,7 @@ class BirthdayBot {
             console.log(`Checking today's birthdays for chat ${chatId}: ${day}.${month}`);
 
             const birthdays = await this.db.getBirthdaysByDate(month, day);
-            
+
             if (birthdays.length === 0) {
                 // Отмечаем, что проверка была выполнена, даже если дней рождения нет
                 this.sentReminders.set(chatId, { date: todayString, sent: false });
@@ -593,7 +611,7 @@ class BirthdayBot {
 
             // Фильтруем только дни рождения этого пользователя
             const userBirthdays = birthdays.filter(birthday => birthday.chat_id === chatId);
-            
+
             if (userBirthdays.length === 0) {
                 // Отмечаем, что проверка была выполнена, даже если у пользователя нет дней рождения
                 this.sentReminders.set(chatId, { date: todayString, sent: false });
@@ -644,7 +662,7 @@ class BirthdayBot {
 
             // Создаем персонализированное сообщение
             const personalizedMessage = this.createCombinedMessage(name, congratulations, giftIdeas);
-            
+
             // Отправляем персонализированное сообщение
             await this.bot.sendMessage(chatId, personalizedMessage);
 
@@ -657,12 +675,12 @@ class BirthdayBot {
 
     createCombinedMessage(name, congratulations, giftIdeas) {
         let message = '';
-        
+
         // Добавляем поздравление
         if (congratulations) {
             message += `💌 ${congratulations}`;
         }
-        
+
         // Добавляем идеи подарков
         if (giftIdeas) {
             if (message) {
@@ -670,28 +688,28 @@ class BirthdayBot {
             }
             message += `🎁 Идеи подарков:\n${giftIdeas}`;
         }
-        
+
         // Ограничиваем до 500 символов (увеличили лимит для нескольких идей)
         if (message.length > 500) {
             // Если сообщение слишком длинное, сокращаем поздравление и идеи подарков
             const availableSpace = 500;
-            
+
             let congratulationsText = '';
             let giftIdeasText = '';
-            
+
             if (congratulations && giftIdeas) {
                 // Распределяем место: 40% на поздравление, 60% на идеи подарков
                 const congratulationsSpace = Math.floor(availableSpace * 0.4) - 10;
                 const giftIdeasSpace = Math.floor(availableSpace * 0.6) - 10;
-                
-                congratulationsText = congratulations.length > congratulationsSpace 
+
+                congratulationsText = congratulations.length > congratulationsSpace
                     ? congratulations.substring(0, congratulationsSpace - 3) + '...'
                     : congratulations;
-                    
-                giftIdeasText = giftIdeas.length > giftIdeasSpace 
+
+                giftIdeasText = giftIdeas.length > giftIdeasSpace
                     ? giftIdeas.substring(0, giftIdeasSpace - 3) + '...'
                     : giftIdeas;
-                    
+
                 message = `💌 ${congratulationsText}\n\n🎁 Идеи подарков:\n${giftIdeasText}`;
             } else if (congratulations) {
                 congratulationsText = congratulations.length > availableSpace - 5
@@ -705,7 +723,7 @@ class BirthdayBot {
                 message = `🎁 Идеи подарков:\n${giftIdeasText}`;
             }
         }
-        
+
         return message;
     }
 
@@ -714,20 +732,20 @@ class BirthdayBot {
         try {
             const now = Date.now();
             const cached = this.birthdayCountCache.get(chatId);
-            
+
             if (cached && (now - cached.lastUpdate) < this.BIRTHDAY_CACHE_TTL) {
                 return cached.count;
             }
-            
+
             const userBirthdays = await this.db.getBirthdaysByChatId(chatId);
             const count = userBirthdays.length;
-            
+
             // Обновляем кэш
             this.birthdayCountCache.set(chatId, {
                 count: count,
                 lastUpdate: now
             });
-            
+
             return count;
         } catch (error) {
             console.error('Error getting birthday count:', error);
@@ -740,7 +758,7 @@ class BirthdayBot {
         try {
             const chatId = user.id;
             const now = Date.now();
-            
+
             // Проверяем кэш
             const cached = this.userCache.get(chatId);
             if (cached && (now - cached.lastUpdate) < this.USER_CACHE_TTL) {
@@ -760,13 +778,13 @@ class BirthdayBot {
             // Сохраняем в базу данных
             await this.db.upsertUser(chatId, username, firstName, lastName, isBot, languageCode);
             await this.db.updateUserActivity(chatId);
-            
+
             // Обновляем кэш
             this.userCache.set(chatId, {
                 lastUpdate: now,
                 userData: { username, firstName, lastName, isBot, languageCode }
             });
-            
+
         } catch (error) {
             console.error('Error saving user info:', error);
         }
@@ -775,12 +793,12 @@ class BirthdayBot {
     async handleEditBirthday(chatId, text) {
         try {
             const birthdayId = this.editingBirthday[chatId];
-            
+
             const parsedData = this.messageParser.parseMessage(text);
-            
+
             if (parsedData.error) {
                 const errorMessage = `❌ ${parsedData.error}\n\n💡 Попробуйте еще раз или используйте кнопки для выхода из режима редактирования.`;
-                
+
                 const keyboard = {
                     inline_keyboard: [
                         [
@@ -793,7 +811,7 @@ class BirthdayBot {
                         ]
                     ]
                 };
-                
+
                 await this.bot.sendMessage(chatId, errorMessage, { reply_markup: keyboard });
                 return;
             }
@@ -808,7 +826,7 @@ class BirthdayBot {
 
             if (updated > 0) {
                 const message = `✅ День рождения успешно обновлен!\n\n👤 Имя: ${parsedData.name}\n📅 Дата: ${new Date(parsedData.date).toLocaleDateString('ru-RU')}\nℹ️ Информация: ${parsedData.info || 'Не указана'}\n\n🔄 Режим редактирования завершен. Вы можете добавить новые дни рождения или редактировать существующие.`;
-                
+
                 const keyboard = {
                     inline_keyboard: [
                         [
@@ -820,14 +838,14 @@ class BirthdayBot {
                         ]
                     ]
                 };
-                
+
                 await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
-                
+
                 // Очищаем режим редактирования
                 delete this.editingBirthday[chatId];
             } else {
                 const errorMessage = `❌ Ошибка при обновлении дня рождения.\n\n💡 Попробуйте еще раз или используйте кнопки для выхода из режима редактирования.`;
-                
+
                 const keyboard = {
                     inline_keyboard: [
                         [
@@ -840,7 +858,7 @@ class BirthdayBot {
                         ]
                     ]
                 };
-                
+
                 await this.bot.sendMessage(chatId, errorMessage, { reply_markup: keyboard });
             }
         } catch (error) {
@@ -857,10 +875,15 @@ class BirthdayBot {
                 await this.bot.sendMessage(chatId, `🔄 Режим редактирования отменен. ${reason}`);
             }
         }
-        
+
         // Также очищаем режим ввода информации о подарках
         if (this.customGiftInput && this.customGiftInput.has(chatId)) {
             this.customGiftInput.delete(chatId);
+        }
+
+        // Очищаем умный flow подбора подарка
+        if (this.smartGiftFlow && this.smartGiftFlow.has(chatId)) {
+            this.smartGiftFlow.delete(chatId);
         }
     }
 
@@ -868,23 +891,23 @@ class BirthdayBot {
     isRateLimited(chatId) {
         const now = Date.now();
         const userData = this.userRequests.get(chatId);
-        
+
         if (!userData) {
             this.userRequests.set(chatId, { count: 1, resetTime: now + this.RATE_WINDOW });
             return false;
         }
-        
+
         // Если окно истекло, сбрасываем счетчик
         if (now > userData.resetTime) {
             this.userRequests.set(chatId, { count: 1, resetTime: now + this.RATE_WINDOW });
             return false;
         }
-        
+
         // Если превышен лимит
         if (userData.count >= this.RATE_LIMIT) {
             return true;
         }
-        
+
         // Увеличиваем счетчик
         userData.count++;
         this.userRequests.set(chatId, userData);
@@ -900,7 +923,7 @@ class BirthdayBot {
                 error: `❌ Сообщение слишком длинное (максимум ${this.MAX_MESSAGE_LENGTH} символов).`
             };
         }
-        
+
         // Проверка на подозрительные символы
         const suspiciousPatterns = [
             /<script/i,
@@ -909,7 +932,7 @@ class BirthdayBot {
             /eval\s*\(/i,
             /function\s*\(/i
         ];
-        
+
         for (const pattern of suspiciousPatterns) {
             if (pattern.test(text)) {
                 return {
@@ -918,7 +941,7 @@ class BirthdayBot {
                 };
             }
         }
-        
+
         // Проверка на повторяющиеся символы (защита от спама)
         const repeatedChars = /(.)\1{20,}/;
         if (repeatedChars.test(text)) {
@@ -927,14 +950,14 @@ class BirthdayBot {
                 error: '❌ Сообщение содержит слишком много повторяющихся символов.'
             };
         }
-        
+
         return { valid: true };
     }
 
     // Метод для санитизации данных
     sanitizeInput(input) {
         if (typeof input !== 'string') return input;
-        
+
         return input
             .replace(/[<>\"'&]/g, '') // Удаляем потенциально опасные символы
             .replace(/\s+/g, ' ') // Нормализуем пробелы
@@ -957,24 +980,25 @@ class BirthdayBot {
     validateCallbackData(data) {
         // Разрешенные callback данные
         const allowedCallbacks = [
-            'list', 'example', 'help', 'status', 'test_reminder', 'format', 
+            'list', 'example', 'help', 'status', 'test_reminder', 'format',
             'stats', 'edit', 'delete', 'main_menu', 'gifts', 'commands',
-            'gifts_birthday', 'gifts_universal', 'gifts_colleague', 
-            'gifts_family', 'gifts_friend', 'gifts_child', 'gifts_custom'
+            'gifts_birthday', 'gifts_universal', 'gifts_colleague',
+            'gifts_family', 'gifts_friend', 'gifts_child', 'gifts_custom',
+            'gift_smart',
         ];
-        
+
         // Проверяем, что это разрешенный callback
         if (allowedCallbacks.includes(data)) {
             return true;
         }
-        
+
         // Проверяем паттерны для edit_ и delete_
         if (data.startsWith('edit_') || data.startsWith('delete_')) {
             const id = data.replace(/^(edit_|delete_)/, '');
             // Проверяем, что ID содержит только цифры
             return /^\d+$/.test(id);
         }
-        
+
         return false;
     }
 
@@ -985,7 +1009,7 @@ class BirthdayBot {
 
 Выберите действие с помощью кнопок ниже:
         `;
-        
+
         const keyboard = {
             inline_keyboard: [
                 [
@@ -1010,7 +1034,7 @@ class BirthdayBot {
                 ]
             ]
         };
-        
+
         await this.bot.sendMessage(chatId, welcomeMessage, { reply_markup: keyboard });
     }
 
@@ -1040,7 +1064,7 @@ class BirthdayBot {
 
 💡 Просто скопируйте любой пример и замените данные!
         `;
-        
+
         const keyboard = {
             inline_keyboard: [
                 [
@@ -1049,7 +1073,7 @@ class BirthdayBot {
                 ]
             ]
         };
-        
+
         await this.bot.sendMessage(chatId, exampleMessage, { reply_markup: keyboard });
     }
 
@@ -1095,7 +1119,7 @@ class BirthdayBot {
 • Сортировка дней рождения по дате
 • Гибкий порядок ввода данных
         `;
-        
+
         const keyboard = {
             inline_keyboard: [
                 [
@@ -1107,7 +1131,7 @@ class BirthdayBot {
                 ]
             ]
         };
-        
+
         await this.bot.sendMessage(chatId, helpMessage, { reply_markup: keyboard });
     }
 
@@ -1150,7 +1174,7 @@ class BirthdayBot {
 • "Мария 20.12.1990"
 • "20.12.1990 Мария"
         `;
-        
+
         const keyboard = {
             inline_keyboard: [
                 [
@@ -1159,14 +1183,14 @@ class BirthdayBot {
                 ]
             ]
         };
-        
+
         await this.bot.sendMessage(chatId, formatMessage, { reply_markup: keyboard });
     }
 
     async showStatus(chatId) {
         const now = moment().format('DD.MM.YYYY HH:mm:ss');
         const nextReminder = '09:00 по МСК времени';
-        
+
         const statusMessage = `
 📊 Статус системы напоминаний:
 
@@ -1179,7 +1203,7 @@ class BirthdayBot {
 
 🧪 Для тестирования используйте команду: /test_reminder
         `;
-        
+
         const keyboard = {
             inline_keyboard: [
                 [
@@ -1188,13 +1212,13 @@ class BirthdayBot {
                 ]
             ]
         };
-        
+
         await this.bot.sendMessage(chatId, statusMessage, { reply_markup: keyboard });
     }
 
     async testReminder(chatId) {
         await this.bot.sendMessage(chatId, '🔍 Запускаю тестовую проверку напоминаний...');
-        
+
         try {
             // Запускаем проверку напоминаний вручную
             await this.checkAndSendRemindersWithTracking();
@@ -1224,10 +1248,10 @@ class BirthdayBot {
 
 🔝 Топ-5 пользователей по активности:
 ${users.slice(0, 5).map((user, index) => {
-    const name = user.username ? `@${user.username}` : user.first_name || `ID: ${user.chat_id}`;
-    const lastActivity = new Date(user.last_activity).toLocaleDateString('ru-RU');
-    return `${index + 1}. ${name} (${lastActivity})`;
-}).join('\n')}
+                const name = user.username ? `@${user.username}` : user.first_name || `ID: ${user.chat_id}`;
+                const lastActivity = new Date(user.last_activity).toLocaleDateString('ru-RU');
+                return `${index + 1}. ${name} (${lastActivity})`;
+            }).join('\n')}
 
 💡 Активными считаются пользователи, которые использовали бота в течение последней недели.
             `;
@@ -1296,7 +1320,7 @@ ${users.slice(0, 5).map((user, index) => {
     async showEditMenu(chatId) {
         try {
             const birthdays = await this.db.getBirthdaysByChatId(chatId);
-            
+
             if (birthdays.length === 0) {
                 const emptyMessage = '📅 У вас пока нет сохраненных дней рождения для редактирования.';
                 const keyboard = {
@@ -1320,11 +1344,11 @@ ${users.slice(0, 5).map((user, index) => {
                 const date = new Date(birthday.birth_date).toLocaleDateString('ru-RU');
                 const info = birthday.info ? ` (${birthday.info})` : '';
                 message += `${index + 1}. ${birthday.name} - ${date}${info}\n`;
-                
+
                 keyboard.inline_keyboard.push([
-                    { 
-                        text: `✏️ ${birthday.name}`, 
-                        callback_data: `edit_${birthday.id}` 
+                    {
+                        text: `✏️ ${birthday.name}`,
+                        callback_data: `edit_${birthday.id}`
                     }
                 ]);
             });
@@ -1343,7 +1367,7 @@ ${users.slice(0, 5).map((user, index) => {
     async showDeleteMenu(chatId) {
         try {
             const birthdays = await this.db.getBirthdaysByChatId(chatId);
-            
+
             if (birthdays.length === 0) {
                 const emptyMessage = '📅 У вас пока нет сохраненных дней рождения для удаления.';
                 const keyboard = {
@@ -1367,11 +1391,11 @@ ${users.slice(0, 5).map((user, index) => {
                 const date = new Date(birthday.birth_date).toLocaleDateString('ru-RU');
                 const info = birthday.info ? ` (${birthday.info})` : '';
                 message += `${index + 1}. ${birthday.name} - ${date}${info}\n`;
-                
+
                 keyboard.inline_keyboard.push([
-                    { 
-                        text: `🗑️ ${birthday.name}`, 
-                        callback_data: `delete_${birthday.id}` 
+                    {
+                        text: `🗑️ ${birthday.name}`,
+                        callback_data: `delete_${birthday.id}`
                     }
                 ]);
             });
@@ -1390,7 +1414,7 @@ ${users.slice(0, 5).map((user, index) => {
     async showEditForm(chatId, birthdayId) {
         try {
             const birthday = await this.db.getBirthdayById(birthdayId);
-            
+
             if (!birthday) {
                 await this.bot.sendMessage(chatId, '❌ День рождения не найден.');
                 return;
@@ -1429,11 +1453,11 @@ ${users.slice(0, 5).map((user, index) => {
             };
 
             await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
-            
+
             // Сохраняем ID для редактирования в сессии пользователя
             this.editingBirthday = this.editingBirthday || {};
             this.editingBirthday[chatId] = birthdayId;
-            
+
             // Устанавливаем таймаут для автоматического выхода из режима редактирования (5 минут)
             setTimeout(() => {
                 if (this.editingBirthday && this.editingBirthday[chatId]) {
@@ -1450,18 +1474,18 @@ ${users.slice(0, 5).map((user, index) => {
     async deleteBirthday(chatId, birthdayId) {
         try {
             const birthday = await this.db.getBirthdayById(birthdayId);
-            
+
             if (!birthday) {
                 await this.bot.sendMessage(chatId, '❌ День рождения не найден.');
                 return;
             }
 
             const success = await this.db.deleteBirthday(birthdayId);
-            
+
             if (success) {
                 const date = new Date(birthday.birth_date).toLocaleDateString('ru-RU');
                 const message = `✅ День рождения "${birthday.name}" (${date}) успешно удален.`;
-                
+
                 const keyboard = {
                     inline_keyboard: [
                         [
@@ -1470,7 +1494,7 @@ ${users.slice(0, 5).map((user, index) => {
                         ]
                     ]
                 };
-                
+
                 await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
             } else {
                 await this.bot.sendMessage(chatId, '❌ Ошибка при удалении дня рождения.');
@@ -1484,7 +1508,7 @@ ${users.slice(0, 5).map((user, index) => {
     async showBirthdayList(chatId) {
         try {
             const birthdays = await this.db.getBirthdaysByChatId(chatId);
-            
+
             if (birthdays.length === 0) {
                 const emptyMessage = '📅 У вас пока нет сохраненных дней рождения.';
                 const keyboard = {
@@ -1539,63 +1563,105 @@ ${users.slice(0, 5).map((user, index) => {
     }
 
     async showGiftIdeasMenu(chatId) {
-        const message = `
-🎁 Генератор идей подарков
+        const message = [
+            '🎁 <b>Генератор идей подарков</b>',
+            '',
+            '💡 Я подберу идеи и дам ссылки на поиск в Ozon, WB и Я.Маркет.',
+            '',
+            'Выберите способ подбора:',
+        ].join('\n');
 
-💡 Я могу предложить несколько вариантов подарков на основе информации о человеке!
-
-Выберите, для кого вы хотите получить идеи подарков:
-        `;
-        
         const keyboard = {
             inline_keyboard: [
                 [
+                    { text: '🎯 Подобрать умно (3 вопроса)', callback_data: 'gift_smart' },
+                ],
+                [
                     { text: '🎂 Для дня рождения', callback_data: 'gifts_birthday' },
-                    { text: '🎈 Универсальные идеи', callback_data: 'gifts_universal' }
+                    { text: '🎈 Универсально', callback_data: 'gifts_universal' }
                 ],
                 [
-                    { text: '👨‍💼 Для коллеги', callback_data: 'gifts_colleague' },
-                    { text: '👨‍👩‍👧‍👦 Для семьи', callback_data: 'gifts_family' }
+                    { text: '👨‍💼 Коллеге', callback_data: 'gifts_colleague' },
+                    { text: '👨‍👩‍👧‍👦 Семье', callback_data: 'gifts_family' }
                 ],
                 [
-                    { text: '👫 Для друга/подруги', callback_data: 'gifts_friend' },
-                    { text: '👶 Для ребенка', callback_data: 'gifts_child' }
+                    { text: '👫 Другу/подруге', callback_data: 'gifts_friend' },
+                    { text: '👶 Ребёнку', callback_data: 'gifts_child' }
                 ],
                 [
-                    { text: '✏️ Ввести информацию о человеке', callback_data: 'gifts_custom' }
+                    { text: '✏️ Свой вариант', callback_data: 'gifts_custom' }
                 ],
                 [
                     { text: '🏠 Главное меню', callback_data: 'main_menu' }
                 ]
             ]
         };
-        
-        await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
+
+        await this.bot.sendMessage(chatId, message, { reply_markup: keyboard, parse_mode: 'HTML' });
     }
 
     async generateGiftIdeas(chatId, occasion, info) {
         try {
-            await this.bot.sendMessage(chatId, '🎁 Генерирую идеи подарков...');
-            
-            const giftIdeas = await this.aiAssistant.generateMultipleGiftIdeas(occasion, info, 5);
-            
-            const message = `🎁 Идеи подарков для ${occasion}:\n\n${giftIdeas}`;
-            
-            const keyboard = {
-                inline_keyboard: [
-                    [
-                        { text: '🔄 Другие идеи', callback_data: 'gifts' },
-                        { text: '🏠 Главное меню', callback_data: 'main_menu' }
-                    ]
-                ]
-            };
-            
-            await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
-            
+            await this.bot.sendMessage(chatId, '⏳ Генерирую идеи подарков...');
+
+            // Используем новый giftIdeasService для получения идей
+            const ideas = await generateGiftIdeas({
+                relation: occasion,
+                interests: info,
+                age: '',
+                budget: '',
+            });
+
+            await this.sendGiftIdeasWithMarketplace(chatId, ideas);
+
         } catch (error) {
             console.error('Error generating gift ideas:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка при генерации идей подарков.');
         }
+    }
+
+    /**
+     * Sends each gift idea as a separate message with marketplace buttons.
+     * @param {number|string} chatId
+     * @param {string[]} ideas
+     */
+    async sendGiftIdeasWithMarketplace(chatId, ideas) {
+        const header = [
+            '🎁 <b>Идеи подарков:</b>',
+            '',
+            ideas.map((idea, i) => `${i + 1}. ${idea}`).join('\n'),
+            '',
+            '👇 Нажмите на кнопки под каждой идеей, чтобы найти товар:',
+        ].join('\n');
+
+        await this.bot.sendMessage(chatId, header, { parse_mode: 'HTML' });
+
+        for (const idea of ideas) {
+            const links = buildMarketplaceLinks(idea);
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '🛒 Ozon', url: links.ozon },
+                        { text: '🟣 WB', url: links.wb },
+                        { text: '🟡 Я.Маркет', url: links.market },
+                    ],
+                ],
+            };
+            await this.bot.sendMessage(chatId, `🔍 <b>${idea}</b>`, {
+                parse_mode: 'HTML',
+                reply_markup: keyboard,
+            });
+        }
+
+        const nav = {
+            inline_keyboard: [
+                [
+                    { text: '🔄 Другие идеи', callback_data: 'gifts' },
+                    { text: '🏠 Главное меню', callback_data: 'main_menu' },
+                ],
+            ],
+        };
+        await this.bot.sendMessage(chatId, '✅ Вот и все идеи! Хотите ещё?', { reply_markup: nav });
     }
 
     async showCustomGiftInput(chatId) {
@@ -1611,7 +1677,7 @@ ${users.slice(0, 5).map((user, index) => {
 
 💡 Чем больше информации вы предоставите, тем лучше будут идеи подарков!
         `;
-        
+
         const keyboard = {
             inline_keyboard: [
                 [
@@ -1619,19 +1685,18 @@ ${users.slice(0, 5).map((user, index) => {
                 ]
             ]
         };
-        
+
         // Устанавливаем режим ввода информации о подарках
         this.customGiftInput.set(chatId, { step: 'name' });
-        
+
         await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
     }
 
     async handleCustomGiftInput(chatId, text) {
         try {
             const inputData = this.customGiftInput.get(chatId);
-            
+
             if (!inputData) {
-                // Если режим не активен, очищаем его
                 this.customGiftInput.delete(chatId);
                 return;
             }
@@ -1646,35 +1711,100 @@ ${users.slice(0, 5).map((user, index) => {
                 return;
             }
 
-            // Генерируем идеи подарков
-            await this.bot.sendMessage(chatId, `🎁 Генерирую персонализированные идеи подарков для ${name}...`);
-            
-            const giftIdeas = await this.aiAssistant.generateMultipleGiftIdeas(name, info, 5);
-            
-            const message = `🎁 Персонализированные идеи подарков для ${name}:\n\n${giftIdeas}`;
-            
-            const keyboard = {
-                inline_keyboard: [
-                    [
-                        { text: '🔄 Другие идеи', callback_data: 'gifts_custom' },
-                        { text: '🎁 Все идеи', callback_data: 'gifts' }
-                    ],
-                    [
-                        { text: '🏠 Главное меню', callback_data: 'main_menu' }
-                    ]
-                ]
-            };
-            
-            await this.bot.sendMessage(chatId, message, { reply_markup: keyboard });
-            
-            // Очищаем режим ввода
+            await this.bot.sendMessage(chatId, `⏳ Генерирую персонализированные идеи подарков для ${name}...`);
+
+            const ideas = await generateGiftIdeas({
+                relation: name,
+                interests: info,
+                age: '',
+                budget: '',
+            });
+
+            // Очищаем режим ввода до отправки (чтобы следующие сообщения не попали в режим)
             this.customGiftInput.delete(chatId);
-            
+
+            await this.sendGiftIdeasWithMarketplace(chatId, ideas);
+
         } catch (error) {
             console.error('Error handling custom gift input:', error);
             await this.bot.sendMessage(chatId, '❌ Ошибка при генерации идей подарков.');
-            // Очищаем режим ввода в случае ошибки
             this.customGiftInput.delete(chatId);
+        }
+    }
+
+    // ── Умный диалоговый flow подбора подарка ─────────────────────────────────
+
+    async startSmartGiftFlow(chatId) {
+        this.smartGiftFlow.set(chatId, { step: 'relation' });
+
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: '❌ Отмена', callback_data: 'gifts' }],
+            ],
+        };
+
+        await this.bot.sendMessage(
+            chatId,
+            '🎯 <b>Умный подбор подарка</b>\n\n👤 <b>Шаг 1 из 3.</b> Кто этот человек?\n\n<i>Например: мама, друг, коллега, жена</i>',
+            { parse_mode: 'HTML', reply_markup: keyboard }
+        );
+    }
+
+    async handleSmartGiftFlowInput(chatId, text) {
+        const state = this.smartGiftFlow.get(chatId);
+        if (!state) return;
+
+        const cancelKeyboard = {
+            inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'gifts' }]],
+        };
+
+        try {
+            switch (state.step) {
+                case 'relation': {
+                    state.relation = text.trim();
+                    state.step = 'interests';
+                    this.smartGiftFlow.set(chatId, state);
+                    await this.bot.sendMessage(
+                        chatId,
+                        '🎯 <b>Умный подбор подарка</b>\n\n💡 <b>Шаг 2 из 3.</b> Какие у него интересы и хобби?\n\n<i>Например: кофе, книги, спорт, путешествия</i>',
+                        { parse_mode: 'HTML', reply_markup: cancelKeyboard }
+                    );
+                    break;
+                }
+                case 'interests': {
+                    state.interests = text.trim();
+                    state.step = 'budget';
+                    this.smartGiftFlow.set(chatId, state);
+                    await this.bot.sendMessage(
+                        chatId,
+                        '🎯 <b>Умный подбор подарка</b>\n\n💰 <b>Шаг 3 из 3.</b> Какой бюджет?\n\n<i>Например: до 1000 руб, 3000-5000 руб, без ограничений</i>',
+                        { parse_mode: 'HTML', reply_markup: cancelKeyboard }
+                    );
+                    break;
+                }
+                case 'budget': {
+                    state.budget = text.trim();
+                    this.smartGiftFlow.delete(chatId);
+
+                    await this.bot.sendMessage(chatId, '⏳ Подбираю идеи подарков...');
+
+                    const ideas = await generateGiftIdeas({
+                        relation: state.relation,
+                        interests: state.interests,
+                        budget: state.budget,
+                        age: '',
+                    });
+
+                    await this.sendGiftIdeasWithMarketplace(chatId, ideas);
+                    break;
+                }
+                default:
+                    this.smartGiftFlow.delete(chatId);
+            }
+        } catch (error) {
+            console.error('[smartGiftFlow] Error:', error);
+            this.smartGiftFlow.delete(chatId);
+            await this.bot.sendMessage(chatId, '❌ Произошла ошибка. Попробуйте снова.');
         }
     }
 
@@ -1690,18 +1820,18 @@ ${users.slice(0, 5).map((user, index) => {
 
     setupHttpServer() {
         const port = process.env.PORT || 3000;
-        
+
         const server = http.createServer((req, res) => {
             if (req.url === '/' && req.method === 'GET') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ 
-                    status: 'ok', 
+                res.end(JSON.stringify({
+                    status: 'ok',
                     message: 'Birthday Bot is running',
                     timestamp: new Date().toISOString()
                 }));
             } else if (req.url === '/health' && req.method === 'GET') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ 
+                res.end(JSON.stringify({
                     status: 'healthy',
                     uptime: process.uptime(),
                     timestamp: new Date().toISOString()
@@ -1730,7 +1860,7 @@ ${users.slice(0, 5).map((user, index) => {
             scheduled: true,
             timezone: "Europe/Moscow"
         });
-        
+
         console.log('✅ Cron jobs set up successfully - daily reminders at 09:00 MSK');
     }
 
@@ -1743,7 +1873,7 @@ ${users.slice(0, 5).map((user, index) => {
             console.log(`Checking birthdays for ${day}.${month}`);
 
             const birthdays = await this.db.getBirthdaysByDate(month, day);
-            
+
             if (birthdays.length === 0) {
                 console.log('No birthdays today');
                 return;
